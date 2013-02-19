@@ -1,28 +1,28 @@
 #!/bin/bash
 ####################
 ### squash-image ###
-version="0.1" ######
+version="0.2" ######
 ####################
 
 ddimage=$(readlink -e "$1");
 mountpoint=$(readlink -e "$2");
 
-exit_status() 
-{ 
-  echo "==> ERROR: $@"; 
-  exit 1; 
+exit_status()
+{
+  echo "==> ERROR: $@";
+  exit 1;
 }
 
 check_depends()
 {
   depends="basename dirname mksquashfs mount umount";
-  for dep in $depends; 
-  do 
-    exists=$(which $dep 2>/dev/null); 
+  for dep in $depends;
+  do
+    exists=$(which $dep 2>/dev/null);
     if [ -z "$exists" ]; then
-      echo "==> MISSING: $dep not installed"; 
-      missing="true"; 
-    fi; 
+      echo "==> MISSING: $dep not installed";
+      missing="true";
+    fi;
   done;
 
   if [ "$missing" = "true" ]; then
@@ -31,6 +31,12 @@ check_depends()
 }
 
 
+# Sanity check
+if [ ! -f "$1" -o ! -d "$2" ]; then
+  echo "USAGE: $(basename $0) [dd image] [mountpoint]";
+  exit 1;
+fi
+
 # Mount image
 [ -f "$ddimage" ] || exit_status "Image file does not exist"
 [ -d "$mountpoint" ] || exit_status "Mount point does not exist"
@@ -38,6 +44,10 @@ checkEmpty=$(ls "$mountpoint" 2>/dev/null | wc -l);
 [ "$checkEmpty" = "0" ] || exit_status "Mount point not empty"
 mount "$ddimage" "$mountpoint" || exit_status "Unable to mount image"
 cd "$mountpoint" || exit_status "Mount point I/O error"
+
+# Delete user histories
+rm ${mountpoint}/root/.bash_history 2>/dev/null;
+rm ${mountpoint}/home/*/.bash_history 2>/dev/null;
 
 # Disable Virtual Terminals
 mv ${mountpoint}/root/10-disableVTs.conf ${mountpoint}/etc/X11/xorg.conf.d/ 2>/dev/null;

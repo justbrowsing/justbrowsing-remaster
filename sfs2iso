@@ -1,20 +1,25 @@
 #!/bin/bash
-####################
-### squash-image ###
-version="0.1" ######
-####################
+###############
+### sfs2iso ###
+version="0.1" #
+###############
 
 distro="justbrowsing";
 timestamp=$(date +%Y%m%d);
 squashDir=$(readlink -e "$1");
 buildDir=$(readlink -e "$2");
 
-exit_status() 
-{ 
-  echo "==> ERROR: $@"; 
-  exit 1; 
+exit_status()
+{
+  echo "==> ERROR: $@";
+  exit 1;
 }
 
+# Sanity check
+if [ ! -d "$1" -o ! -d "$2" ]; then
+  echo "USAGE: $(basename $0) [squash directory] [syslinux directory]";
+  exit 1;
+fi
 
 # Symlink squashfs
 [ -f "$squashDir/root-image.fs.sfs" ] || exit_status "File root-image.fs.sfs does not exist"
