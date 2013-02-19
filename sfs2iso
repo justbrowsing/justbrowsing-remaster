@@ -1,0 +1,37 @@
+#!/bin/bash
+####################
+### squash-image ###
+version="0.1" ######
+####################
+
+distro="justbrowsing";
+timestamp=$(date +%Y%m%d);
+squashDir=$(readlink -e "$1");
+buildDir=$(readlink -e "$2");
+
+exit_status() 
+{ 
+  echo "==> ERROR: $@"; 
+  exit 1; 
+}
+
+
+# Symlink squashfs
+[ -f "$squashDir/root-image.fs.sfs" ] || exit_status "File root-image.fs.sfs does not exist"
+mv "$squashDir/root-image.fs.sfs" "$buildDir"/arch/any/ || exit_status "Non-empty destination: $buildDir/arch/any/"
+
+# Kernel and initrd
+[ -f "$squashDir/vmlinuz-linux" ] || exit_status "File vmlinuz-linux does not exist"
+cp "$squashDir"/vmlinuz-linux "$buildDir"/arch/boot/i686/vmlinuz || exit_status "Cannot copy i686 kernel"
+cp "$squashDir"/vmlinuz-linux "$buildDir"/arch/boot/x86_64/vmlinuz || exit_status "Cannot copy x86_64 kernel"
+[ -f "$squashDir/initramfs-linux.img" ] || exit_status "File initramfs-linux.img does not exist"
+cp "$squashDir"/initramfs-linux.img "$buildDir"/arch/boot/i686/archiso.img || exit_status "Cannot copy i686 initrd"
+cp "$squashDir"/initramfs-linux.img "$buildDir"/arch/boot/x86_64/archiso.img || exit_status "Cannot copy x86_64 initrd"
+
+
+# Build ISO
+cd "$buildDir"
+[ -f "isolinux/isolinux.bin" -a -f "isolinux/boot.cat" ] || exit_status "Wrong directory";
+genisoimage -l -r -J -V "$distro" -b isolinux/isolinux.bin -no-emul-boot -boot-load-size 4 -boot-info-table -c isolinux/boot.cat -o ../${distro}_${timestamp}.iso . || exit_status "genisoimage failed";
+parentDir=$(dirname "$buildDir");
+echo "Successfully built: $parentDir/${distro}_${timestamp}.iso"

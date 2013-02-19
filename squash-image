@@ -1,0 +1,77 @@
+#!/bin/bash
+####################
+### squash-image ###
+version="0.1" ######
+####################
+
+ddimage=$(readlink -e "$1");
+mountpoint=$(readlink -e "$2");
+
+exit_status() 
+{ 
+  echo "==> ERROR: $@"; 
+  exit 1; 
+}
+
+check_depends()
+{
+  depends="basename dirname mksquashfs mount umount";
+  for dep in $depends; 
+  do 
+    exists=$(which $dep 2>/dev/null); 
+    if [ -z "$exists" ]; then
+      echo "==> MISSING: $dep not installed"; 
+      missing="true"; 
+    fi; 
+  done;
+
+  if [ "$missing" = "true" ]; then
+    exit_status "Missing dependencies";
+  fi;
+}
+
+
+# Mount image
+[ -f "$ddimage" ] || exit_status "Image file does not exist"
+[ -d "$mountpoint" ] || exit_status "Mount point does not exist"
+checkEmpty=$(ls "$mountpoint" 2>/dev/null | wc -l);
+[ "$checkEmpty" = "0" ] || exit_status "Mount point not empty"
+mount "$ddimage" "$mountpoint" || exit_status "Unable to mount image"
+cd "$mountpoint" || exit_status "Mount point I/O error"
+
+# Disable Virtual Terminals
+mv ${mountpoint}/root/10-disableVTs.conf ${mountpoint}/etc/X11/xorg.conf.d/ 2>/dev/null;
+
+# Clean packages
+rm ${mountpoint}/var/cache/packer/* 2>/dev/null;
+rm ${mountpoint}/var/cache/pacman/* 2>/dev/null;
+
+# Clean logs
+rm ${mountpoint}/var/log/faillog 2>/dev/null;
+rm ${mountpoint}/var/log/restoreboot.log 2>/dev/null;
+rm -r ${mountpoint}/var/log/journal/ 2>/dev/null;
+rm -r ${mountpoint}/var/log/old/ 2>/dev/null;
+
+# Allow squashfs boot
+mv ${mountpoint}/etc/fstab ${mountpoint}/etc/fstab.working 2>/dev/null;
+mv ${mountpoint}/etc/mtab ${mountpoint}/etc/mtab.working 2>/dev/null;
+
+# Unmount image
+cd /
+read -p "Ready to build squashfs (y/N)?: " input;
+[[ "$input" = [yY] ]] || exit 0;
+sync; sleep 1; sync; sleep 1; sync;
+umount $mountpoint/
+checkEmpty=$(ls "$mountpoint" 2>/dev/null | wc -l);
+[ "$checkEmpty" = "0" ] || exit_status "Unable to unmount the image"
+
+# Squash filesystem
+sFile=$(basename "$ddimage");
+sParent=$(dirname "$ddimage");
+sDir=$(basename "$sParent");
+sGrandparent=$(dirname "$sParent");
+[ "$sFile" = "root-image.fs" ] || exit_status "Image filename must be named: root-image.fs"
+[ "$sDir" = "squashfs-root" ] || exit_status "Image directory must be named: squasfs-root"
+mksquashfs "$sParent" "$sGrandparent"/${sFile}.sfs || exit_status "mksquashfs failed"
+
+### END ###
