@@ -2,7 +2,7 @@ justbrowsing-remaster
 =====================
 Tools to remaster JustBrowsing and convert to ISO
 
-* Depends on community/squashfs-tools
+* Depends on community/squashfs-tools and core/syslinux
 * squash-image - converts dd image to squash-filesystem
 * sfs2iso - converts squash-filesystem to ISO
 

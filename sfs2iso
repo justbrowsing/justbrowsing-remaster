@@ -1,13 +1,14 @@
 #!/bin/bash
 ###############
 ### sfs2iso ###
-version="0.1" #
+version="0.2" #
 ###############
 
 distro="justbrowsing";
 timestamp=$(date +%Y%m%d);
 squashDir=$(readlink -e "$1");
 buildDir=$(readlink -e "$2");
+output="${distro}_${timestamp}.iso"
 
 exit_status()
 {
@@ -37,6 +38,11 @@ cp "$squashDir"/initramfs-linux.img "$buildDir"/arch/boot/x86_64/archiso.img || 
 # Build ISO
 cd "$buildDir"
 [ -f "isolinux/isolinux.bin" -a -f "isolinux/boot.cat" ] || exit_status "Wrong directory";
-genisoimage -l -r -J -V "$distro" -b isolinux/isolinux.bin -no-emul-boot -boot-load-size 4 -boot-info-table -c isolinux/boot.cat -o ../${distro}_${timestamp}.iso . || exit_status "genisoimage failed";
+genisoimage -l -r -J -V "$distro" -b isolinux/isolinux.bin -no-emul-boot -boot-load-size 4 -boot-info-table \
+	-c isolinux/boot.cat -o ../"$output" . || exit_status "genisoimage failed";
 parentDir=$(dirname "$buildDir");
+
+# Hybrid-ize ISO (allows USB boot)
+isohybrid ../"$output" || exit_status "isohybrid failed"
+
 echo "Successfully built: $parentDir/${distro}_${timestamp}.iso"
