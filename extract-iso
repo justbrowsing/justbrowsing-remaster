@@ -23,7 +23,6 @@ dirName=$(pwd);
 [ ! -z "$checkISO" ] || exit_status "$isoFile not a valid ISO file";
 [ "$checkISO" = "x86 boot sector" ] && echo "==> Hybrid-ized ISO detected"
 [ ! -z "$ifSquash" ] || exit_status "Package squashfs-tools missing"
-[ -d "$dirName/syslinux" ] || exit_status "Directory syslinux missing"
 
 if [ ! -z "$ifImage" ]; then
   squashImage="squash-image";
@@ -58,7 +57,7 @@ rm "${buildDir}/syslinux/arch/boot/syslinux/splash.png" &&
 if [ -f "splash.png" ]; then
   cp splash.png "${buildDir}/syslinux/arch/boot/syslinux/splash.png" || exit_status "cp failed"
 else
-  wget "https://raw.github.com/justbrowsing/justbrowsing-remaster/master/splash.png" -O "${buildDir}/syslinux/arch/boot/syslinux/splash.png" || exit_status "wget failed"
+  wget --quiet "https://raw.github.com/justbrowsing/justbrowsing-remaster/master/splash.png" -O "${buildDir}/syslinux/arch/boot/syslinux/splash.png" || exit_status "wget failed"
 fi
 
 # Unsquash image
