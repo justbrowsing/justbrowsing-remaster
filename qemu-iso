@@ -1,0 +1,4 @@
+#!/bin/bash
+
+isoFile="$1"
+QEMU_AUDIO_DRV=alsa qemu-system-x86_64 -enable-kvm -cdrom "$isoFile" -m 2000 -machine type=pc,accel=kvm -cpu host -vga vmware -soundhw ac97
