@@ -1,0 +1,88 @@
+#!/bin/bash
+###################
+### extract-iso ###
+version="0.2" #####
+###################
+
+isoFile=$(readlink -e "$@");
+mntDir="/media/jb-iso"
+tmpDir="/opt/jb-tmp"
+buildDir="/opt/jb-build"
+
+exit_status() { echo "ERROR: $@"; exit 1; }
+
+
+# Check depends
+checkISO=$(file "$isoFile" | awk -F ":" '{print $2}' | grep -o -e "ISO 9660" -e "x86 boot sector");
+ifSquash=$(which mksquashfs 2>/dev/null);
+ifImage=$(which squash-image 2>/dev/null);
+ifSfs=$(which sfs2iso 2>/dev/null);
+dirName=$(pwd);
+
+[ -f "$isoFile" ] || exit_status "file $isoFile does not exist"
+[ ! -z "$checkISO" ] || exit_status "$isoFile not a valid ISO file";
+[ "$checkISO" = "x86 boot sector" ] && echo "==> Hybrid-ized ISO detected"
+[ ! -z "$ifSquash" ] || exit_status "Package squashfs-tools missing"
+[ -d "$dirName/syslinux" ] || exit_status "Directory syslinux missing"
+
+if [ ! -z "$ifImage" ]; then
+  squashImage="squash-image";
+elif [ -f "$dirName/squash-image" ]; then
+  squashImage="$dirName/squash-image";
+else
+  exit_status "Script squash-image missing";
+fi
+
+if [ ! -z "$ifSfs" ]; then
+  sfs2ISO="sfs2iso";
+elif [ -f "$dirName/sfs2iso" ]; then
+  sfs2ISO="$dirName/sfs2iso";
+else
+  exit_status "Script sfs2iso missing";
+fi
+
+# Setup
+[ "$UID" = "0" ] || exit_status "Need to be root"
+mkdir -p "$mntDir" "$tmpDir" "$buildDir" &&
+
+
+# Unpack image
+mount -o loop "$isoFile" "$mntDir" &&
+echo "==> Mounted $isoFile : $mntDir" &&
+cd "$tmpDir" &&
+unsquashfs "${mntDir}/arch/any/root-image.fs.sfs" &&
+echo "==> Unsquashed to $tmpDir" &&
+cd - > /dev/null &&
+cp "${mntDir}/arch/boot/i686/vmlinuz" "${tmpDir}/vmlinuz-linux" &&
+cp "${mntDir}/arch/boot/i686/archiso.img" "${tmpDir}/initramfs-linux.img" &&
+cp -r "$dirName/syslinux" "$buildDir" &&
+
+# Mount image
+umount "$mntDir" &&
+mount "${tmpDir}/squashfs-root/root-image.fs" "$mntDir" &&
+echo "+++++++++++++++++++++++++++++++++";
+echo "==> Mounted at: ${mntDir}";
+echo "==> Firefox profile: ${mntDir}/home/user/.mozilla/firefox/oknp3n8p.default-backup";
+echo "==> Chrome profile: ${mntDir}/home/user/.config/google-chrome-backup";
+echo "+++++++++++++++++++++++++++++++++";
+
+# Remaster ISO
+read -p "==> Repack image (y/N): " input
+if [[ "$input" = [yY] ]]; then
+  umount "$mntDir" &&
+  echo "==> Squash Image :: $squashImage" &&
+  "$squashImage" "${tmpDir}/squashfs-root/root-image.fs" "$mntDir" --noconfirm &&
+  echo "==> Convert to ISO  :: $sfs2ISO" &&
+  "$sfs2ISO" "$tmpDir" "${buildDir}/syslinux" &&
+  echo "[DONE]";
+fi
+
+# Cleanup
+read -p "==> Cleanup (y/N): " input
+if [[ "$input" = [yY] ]]; then
+  rm -rf "$mntDir"
+  rm -rf "$buildDir/syslinux"
+  rm -rf "$tmpDir"
+fi
+
+### END ###
