@@ -1,7 +1,7 @@
 #!/bin/bash
 ###############
 ### sfs2iso ###
-version="0.3" #
+version="0.2" #
 ###############
 
 distro="justbrowsing";
@@ -22,34 +22,21 @@ if [ ! -d "$1" -o ! -d "$2" ]; then
   exit 1;
 fi
 
-
-# Copy squashfs
+# Symlink squashfs
 [ -f "$squashDir/root-image.fs.sfs" ] || exit_status "File root-image.fs.sfs does not exist"
-[ -f "$buildDir/arch/any/root-image.fs.sfs" ] && rm "$buildDir/arch/any/root-image.fs.sfs" 2>/dev/null
-ln "$squashDir/root-image.fs.sfs" "$buildDir/arch/any/root-image.fs.sfs" || exit_status "Non-empty destination: $buildDir/arch/any/"
+mv "$squashDir/root-image.fs.sfs" "$buildDir"/arch/any/ || exit_status "Non-empty destination: $buildDir/arch/any/"
 
 # Kernel and initrd
 [ -f "$squashDir/vmlinuz-linux" ] || exit_status "File vmlinuz-linux does not exist"
 cp "$squashDir"/vmlinuz-linux "$buildDir"/arch/boot/i686/vmlinuz || exit_status "Cannot copy i686 kernel"
+cp "$squashDir"/vmlinuz-linux "$buildDir"/arch/boot/x86_64/vmlinuz || exit_status "Cannot copy x86_64 kernel"
 [ -f "$squashDir/initramfs-linux.img" ] || exit_status "File initramfs-linux.img does not exist"
-if [ ! -f "${buildDir}/arch/boot/i686/archiso.img" ]; then
-  if [ -f "${squashDir}/initramfs-linux.img" ]; then
-    cp "${squashDir}/initramfs-linux.img" "$buildDir"/arch/boot/i686/archiso.img || exit_status "Cannot copy i686 initrd"
-  else
-    cp "$squashDir"/archiso.img "$buildDir"/arch/boot/i686/archiso.img || exit_status "Cannot copy i686 initrd"
-  fi
-fi
-
+cp "$squashDir"/initramfs-linux.img "$buildDir"/arch/boot/i686/archiso.img || exit_status "Cannot copy i686 initrd"
+cp "$squashDir"/initramfs-linux.img "$buildDir"/arch/boot/x86_64/archiso.img || exit_status "Cannot copy x86_64 initrd"
 
 
 # Build ISO
 cd "$buildDir"
-
-# Add timestamp
-sed -i "s/^JustBrowsing.*/JustBrowsing $timestamp/g" arch/boot/syslinux/archiso_firefox.cfg
-sed -i "s/^JustBrowsing.*/JustBrowsing $timestamp/g" arch/boot/syslinux/archiso_chrome.cfg
-sed -i "s/^JustBrowsing.*/JustBrowsing $timestamp/g" arch/boot/syslinux/archiso_vmware.cfg
-
 [ -f "isolinux/isolinux.bin" -a -f "isolinux/boot.cat" ] || exit_status "Wrong directory";
 genisoimage -l -r -J -V "$distro" -b isolinux/isolinux.bin -no-emul-boot -boot-load-size 4 -boot-info-table \
 	-c isolinux/boot.cat -o ../"$output" . || exit_status "genisoimage failed";
@@ -58,9 +45,4 @@ parentDir=$(dirname "$buildDir");
 # Hybrid-ize ISO (allows USB boot)
 isohybrid ../"$output" || exit_status "isohybrid failed"
 
-# Cleanup
-rm "$buildDir"/arch/any/root-image.fs.sfs 
-echo "==> Successfully built: $parentDir/$output"
-echo "scp $parentDir/$output justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/"
-
-### END ###
+echo "Successfully built: $parentDir/${distro}_${timestamp}.iso"
