@@ -191,10 +191,10 @@ echo "";
 if [[ "$input" != [Nn] ]]; then
   isoFile=$(grep "Successfully built:" "${buildDir}/latest" | awk '{print $NF}');
   if [ -f "$buildDir/README.md" -a -f "$isoFile" ]; then
-    echo "==> scp $buildDir/README.md justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/"
-    scp "$buildDir/README.md" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/ &&
     echo "==> scp $isoFile justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/"
-    scp "$isoFile" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/
+    scp "$isoFile" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/ &&
+    echo "==> scp $buildDir/README.md justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/"
+    scp "$buildDir/README.md" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/ 
   else
     echo "Upload failed"
   fi
