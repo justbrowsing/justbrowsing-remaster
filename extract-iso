@@ -1,8 +1,9 @@
 #!/bin/bash
-###################
-### extract-iso ###
-version="0.3" #####
-###################
+####################
+### extract-iso ####
+version="0.3" ######
+### JustBrowsing ###
+####################
 
 isoFile=$(readlink -e "$@");
 mntDir="/media/jb-iso"

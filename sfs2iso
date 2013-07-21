@@ -1,8 +1,9 @@
 #!/bin/bash
-###############
-### sfs2iso ###
-version="0.3" #
-###############
+####################
+### sfs2iso ########
+version="0.3" ######
+### JustBrowsing ###
+####################
 
 distro="justbrowsing";
 timestamp=$(date +%Y%m%d);
@@ -61,6 +62,5 @@ isohybrid ../"$output" || exit_status "isohybrid failed"
 # Cleanup
 rm "$buildDir"/arch/any/root-image.fs.sfs 
 echo "==> Successfully built: $parentDir/$output"
-echo "scp $parentDir/$output justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/"
 
 ### END ###

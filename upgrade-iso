@@ -1,0 +1,203 @@
+#!/bin/bash
+####################
+### upgrade-iso ####
+version="0.5" ######
+### JustBrowsing ###
+####################
+
+isoFile=$(readlink -e "$@");
+mntDir="/opt/jb-iso"
+tmpDir="/opt/jb-tmp"
+buildDir="/opt/jb-build"
+pkgDir="/opt/jb-pkg"
+
+
+EXIT_STATUS() { echo "ERROR: $@"; CLEAN_UP; exit 1; }
+
+CLEAN_UP() 
+{
+  echo "==> Cleanup";
+  umount "${mntDir}/var/cache" "${mntDir}/tmp" "${mntDir}/proc/" "${mntDir}/sys/" "${mntDir}/dev/pts" "${mntDir}/dev/" 2>/dev/null;
+  umount "$mntDir/*/*" 2>/dev/null;
+  umount "$mntDir/*" 2>/dev/null;
+  umount "$mntDir" 2>/dev/null;
+  rm -rf "$mntDir"
+  rm -rf "$buildDir/syslinux"
+  rm -rf "$buildDir/var-cache"
+  rm -rf "$buildDir/tmp-dir"
+  rm -rf "$tmpDir"
+}
+
+
+# Check depends
+checkISO=$(file "$isoFile" | awk -F ":" '{print $2}' | grep -o -e "ISO 9660" -e "x86 boot sector");
+ifSquash=$(which mksquashfs 2>/dev/null);
+ifImage=$(which squash-image 2>/dev/null);
+ifSfs=$(which sfs2iso 2>/dev/null);
+dirName=$(pwd);
+
+[ -f "$isoFile" ] || EXIT_STATUS "file $isoFile does not exist"
+[ ! -z "$checkISO" ] || EXIT_STATUS "$isoFile not a valid ISO file";
+[ "$checkISO" = "x86 boot sector" ] && echo "==> Hybrid-ized ISO detected"
+[ ! -z "$ifSquash" ] || EXIT_STATUS "Package squashfs-tools missing"
+
+if [ ! -z "$ifImage" ]; then
+  squashImage="squash-image";
+elif [ -f "$dirName/squash-image" ]; then
+  squashImage="$dirName/squash-image";
+else
+  EXIT_STATUS "Script squash-image missing";
+fi
+
+if [ ! -z "$ifSfs" ]; then
+  sfs2ISO="sfs2iso";
+elif [ -f "$dirName/sfs2iso" ]; then
+  sfs2ISO="$dirName/sfs2iso";
+else
+  EXIT_STATUS "Script sfs2iso missing";
+fi
+
+# Setup
+[ "$UID" = "0" ] || EXIT_STATUS "Need to be root"
+mkdir -p "$mntDir" "$tmpDir" "$buildDir" &&
+
+# Unpack image
+mount -o loop "$isoFile" "$mntDir" &&
+echo "==> Mounted $isoFile : $mntDir" &&
+mkdir -p "${buildDir}/syslinux/arch/any" &&
+cp -r "${mntDir}/[BOOT]" "${mntDir}/EFI" "${mntDir}/isolinux" "${mntDir}/loader" "${buildDir}/syslinux/" &&
+cp "${mntDir}/arch"/{aitab,checksum.i686.md5,pkglist.i686.txt} "${buildDir}/syslinux/arch/" &&
+mkdir -p "${buildDir}/syslinux/arch/boot"/{i686,x86_64} &&
+cp -r "${mntDir}/arch/boot"/{memtest,memtest.COPYING,syslinux} "${buildDir}/syslinux/arch/boot/" &&
+
+# Unsquash image
+cd "$tmpDir" &&
+unsquashfs "${mntDir}/arch/any/root-image.fs.sfs" &&
+echo "==> Unsquashed to $tmpDir" &&
+cd - > /dev/null &&
+cp "${mntDir}/arch/boot/i686/vmlinuz" "${tmpDir}/vmlinuz-linux" &&
+cp "${mntDir}/arch/boot/i686/archiso.img" "${tmpDir}/initramfs-linux.img" &&
+
+# Mount image
+umount "$mntDir" &&
+mount "${tmpDir}/squashfs-root/root-image.fs" "$mntDir" &&
+echo "==> Mounted at: ${mntDir}" &&
+
+# Upgrade packages
+sed -i 's/^Architecture =.*/Architecture = i686/g' "${mntDir}/etc/pacman.conf" &&
+sed -i 's/^CheckSpace/#CheckSpace/g' "${mntDir}/etc/pacman.conf" &&
+cp "${mntDir}/etc/fstab.working" "${mntDir}/etc/fstab" &&
+cp "${mntDir}/etc/mtab.working" "${mntDir}/etc/mtab" &&
+
+mkdir "${buildDir}/var-cache"
+mkdir "${buildDir}/tmp-dir"
+mount -o bind,exec,rw "${buildDir}/var-cache" "${mntDir}/var/cache"
+mount -o bind,exec,rw "${buildDir}/tmp-dir" "${mntDir}/tmp"
+mkdir -p "${mntDir}/var/cache/pacman/pkg"
+[ -d "${pkgDir}" ] && cp "${pkgDir}"/* "${buildDir}/var-cache/pacman/pkg/" 2>/dev/null;
+
+# Enter chroot
+echo "==> Mounting chroot: ${mntDir}"
+mount -t proc proc "${mntDir}/proc/"
+mount -t sysfs sys "${mntDir}/sys/"
+mount -o bind /dev "${mntDir}/dev/"
+mount -t devpts pts "${mntDir}/dev/pts"
+cp "${mntDir}/etc/resolv.conf" "${mntDir}/etc/resolv.conf.working"
+cp /etc/resolv.conf "${mntDir}/etc/resolv.conf"
+
+read -t 5 -n 1 -p "==> Enter chroot (y/N): " input
+echo "";
+if [[ "$input" = [Yy] ]]; then
+  chroot "$mntDir" /bin/bash;
+fi
+
+# Check Firefox profile
+FFpath="/home/user/.mozilla/firefox/oknp3n8p.default";
+if [ -d "$mntDir/${FFpath}-backup" ]; then
+  chroot "$mntDir" rm -rf "$FFpath";
+  chroot "$mntDir" mv "${FFpath}-backup" "$FFpath";
+fi
+
+# Check Chrome profile
+GCpath="/home/user/.config/google-chrome";
+if [ -d "$mntDir/${GCpath}-backup" ]; then
+  chroot "$mntDir" rm -rf "$GCpath";
+  chroot "$mntDir" mv "${GCpath}-backup" "$GCpath";
+fi
+
+# Upgrade packages
+chroot "$mntDir" mkdir -p /var/cache/{packer,pacman}/pkg
+chroot "$mntDir" pacman -Sywu --noconfirm
+for pkg in $(ls ${mntDir}/var/cache/pacman/pkg/); do 
+  chroot "$mntDir" pacman -U /var/cache/pacman/pkg/$pkg --noconfirm; 
+  chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null;
+done
+
+# Generate initrd for livecd
+chroot "$mntDir" pacman -S archiso --noconfirm
+chroot "$mntDir" pacman -Su --noconfirm
+cp "${mntDir}/etc/mkinitcpio.conf.livecd" "${mntDir}/etc/mkinitcpio.conf"
+chroot "$mntDir" mkinitcpio -p linux
+cp "${mntDir}/boot/vmlinuz-linux" "${tmpDir}/vmlinuz-linux"
+cp "${mntDir}/boot/initramfs-linux.img" "${tmpDir}/initramfs-linux.img"
+chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null;
+chroot "$mntDir" /opt/justbrowsing/cleanup2 2>/dev/null;
+chroot "$mntDir" df -h 2>/dev/null | grep /$;
+
+# Upgrade AUR
+chroot "$mntDir" apacman --auronly -Su --noconfirm;
+chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null;
+chroot "$mntDir" /opt/justbrowsing/cleanup2 2>/dev/null;
+chroot "$mntDir" df -h 2>/dev/null | grep /$;
+
+# Update changelog
+pkgLog="${mntDir}/root/README.md"
+nightlyHead="JustBrowsing Nightlies are untested, auto-built releases.\n=============\nNightly builds are based from the latest stable JustBrowsing release with the packages upgraded.\n\n\nChangelog:\n-------------"
+nightlyTail="\n\n- - -\n[Build scripts](https://github.com/justbrowsing/justbrowsing-remaster)\n[Homepage](http://justbrowsing.info)"
+echo "==> Packages upgraded:"
+chroot "$mntDir" /opt/justbrowsing/pkglist
+[ -f "${mntDir}/root/pkgs.diff" ] || EXIT_STATUS "ISO not upgraded"
+echo -e "$nightlyHead" > "$pkgLog"
+date +"+   "%Y%m%d_nightly >> "$pkgLog"
+cat "${mntDir}/root/pkgs.diff" >> "$pkgLog"
+echo -e "$nightlyTail" >> "$pkgLog"
+cp "$pkgLog" "$buildDir"
+
+# Exit chroot
+umount "${mntDir}/var/cache" "${mntDir}/tmp" "${mntDir}/proc/" "${mntDir}/sys/" "${mntDir}/dev/pts" "${mntDir}/dev/"
+sed -i 's/^Architecture = i686/Architecture = auto/g' "${mntDir}/etc/pacman.conf"
+sed -i 's/^#CheckSpace/CheckSpace/g' "${mntDir}/etc/pacman.conf" 
+rm "${mntDir}/etc/fstab" "${mntDir}/etc/mtab" 
+cp "${mntDir}/etc/resolv.conf.working" "${mntDir}/etc/resolv.conf"
+
+# Remaster ISO
+read -t 5 -n 1 -p "==> Repack image (Y/n): " input
+echo "";
+if [[ "$input" != [Nn] ]]; then
+  umount "$mntDir" &&
+  echo "==> Squash Image :: $squashImage" &&
+  "$squashImage" "${tmpDir}/squashfs-root/root-image.fs" "$mntDir" --noconfirm &&
+  echo "==> Convert to ISO  :: $sfs2ISO" &&
+  "$sfs2ISO" "$tmpDir" "${buildDir}/syslinux" --nightly | tee "${buildDir}/latest" &&
+  echo "[DONE]"; 
+fi
+
+# Cleanup
+CLEAN_UP
+
+# Upload
+read -t 5 -n 1 -p "==> Upload ISO (Y/n): " input
+echo "";
+if [[ "$input" != [Nn] ]]; then
+  isoFile=$(grep "Successfully built:" "${buildDir}/latest" | awk '{print $NF}');
+  if [ -f "$buildDir/README.md" -a -f "$isoFile" ]; then
+    echo "==> scp $buildDir/README.md justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/"
+    scp "$buildDir/README.md" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/ &&
+    echo "==> scp $isoFile justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/"
+    scp "$isoFile" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/
+  else
+    echo "Upload failed"
+  fi
+fi
+
+### END ###
