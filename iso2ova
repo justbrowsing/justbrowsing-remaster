@@ -1,0 +1,62 @@
+#!/bin/bash
+####################
+### iso2ova ########
+version="0.1" ######
+### JustBrowsing ###
+####################
+
+isoPath=$(readlink -e "$1");
+vmName="JustBrowsing";
+vmMemory="2048";
+fileVDI=$(echo "$isoPath" | sed -e 's/\.iso$/\.vdi/' -e 's/\.ISO$/\.vdi/');
+fileOVA=$(echo "$isoPath" | sed -e 's/\.iso$/\.ova/' -e 's/\.ISO$/\.ova/');
+
+
+EXIT_STATUS() { echo "ERROR: $@"; exit 1; }
+
+CONVERT_HDD()
+{
+  VBoxManage convertfromraw -format VDI "$isoPath" "$fileVDI";
+}
+
+CREATE_VM()
+{
+  echo "VM name: $vmName";
+  VBoxManage createvm --name "$vmName" --ostype ArchLinux --register;
+  echo "VM memory: $vmMemory";
+  VBoxManage modifyvm "$vmName" --memory "$vmMemory" --acpi on;
+  echo "VM networking: NAT";
+  VBoxManage modifyvm "$vmName" --nic1 nat --bridgeadapter1 eth0;
+  echo "VM storage: IDE";
+  VBoxManage storagectl "$vmName" --name "IDE Controller" --add ide;
+  echo "VM disk: $(basename "$fileVDI")";
+  VBoxManage storageattach "$vmName" --storagectl "IDE Controller" --port 0 --device 0 --type hdd --medium "$fileVDI";
+  echo "VM sound: PulseAudio/AC97"  ;
+  VBoxManage modifyvm "$vmName" --audio pulse --audiocontroller ac97;
+}
+
+EXPORT_OVA()
+{
+  VBoxManage export "$vmName" -o "$fileOVA";
+}
+
+DELETE_VM()
+{
+  VBoxManage unregistervm "$vmName" --delete;
+  rm "$fileVDI" 2>/dev/null;
+}
+
+
+[ -f "$isoPath" ] && [[ "$isoPath" = *.[iI][Ss][Oo] ]] || EXIT_STATUS "$(basename $0) [ISO file]"
+[ -f "$fileOVA" ] && rm "$fileOVA"
+DELETE_VM 2>/dev/null;
+echo "==> Converting ISO to VDI" &&
+CONVERT_HDD &&
+echo "==> Creating VM: $vmMemory MB, NAT networking, PulseAudio/AC97" &&
+CREATE_VM &&
+echo "==> Exporting to OVA container" &&
+EXPORT_OVA &&
+echo "==> Successfully built: $fileOVA" &&
+DELETE_VM;
+
+### END ###
