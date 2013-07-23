@@ -9,6 +9,7 @@ distro="justbrowsing";
 timestamp=$(date +%Y%m%d);
 squashDir=$(readlink -e "$1");
 buildDir=$(readlink -e "$2");
+[ "$3" = "--nightly" ] && timestamp="${timestamp}_nightly";
 output="${distro}_${timestamp}.iso"
 
 exit_status()

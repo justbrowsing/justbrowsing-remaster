@@ -1,15 +1,16 @@
 #!/bin/bash
 ####################
 ### upgrade-iso ####
-version="0.5" ######
+version="0.6" ######
 ### JustBrowsing ###
 ####################
 
-isoFile=$(readlink -e "$@");
+isoFile=$(readlink -e "$@" 2>/dev/null);
 mntDir="/opt/jb-iso"
 tmpDir="/opt/jb-tmp"
 buildDir="/opt/jb-build"
 pkgDir="/opt/jb-pkg"
+enableOVA="true"
 
 
 EXIT_STATUS() { echo "ERROR: $@"; CLEAN_UP; exit 1; }
@@ -29,11 +30,19 @@ CLEAN_UP()
 }
 
 
+# Autobuild support
+if [ -z "$1" ]; then
+  latest=$(grep "Successfully built:" "${buildDir}/latest" 2>/dev/null | awk '{print $NF}');
+  isoFile=$(readlink -e "$latest" 2>/dev/null);
+fi
+
 # Check depends
 checkISO=$(file "$isoFile" | awk -F ":" '{print $2}' | grep -o -e "ISO 9660" -e "x86 boot sector");
 ifSquash=$(which mksquashfs 2>/dev/null);
 ifImage=$(which squash-image 2>/dev/null);
 ifSfs=$(which sfs2iso 2>/dev/null);
+ifOVA=$(which iso2ova 2>/dev/null);
+ifVBOX=$(which VBoxManage 2>/dev/null);
 dirName=$(pwd);
 
 [ -f "$isoFile" ] || EXIT_STATUS "file $isoFile does not exist"
@@ -57,9 +66,22 @@ else
   EXIT_STATUS "Script sfs2iso missing";
 fi
 
+if [ ! -z "$ifOVA" ]; then
+  iso2OVA="iso2ova";
+elif [ -f "$dirName/iso2ova" ]; then
+  iso2OVA="$dirName/iso2ova";
+else
+  enableOVA="false";
+fi
+
+if [ ! -z "$ifVBOX" -a "$enableOVA" = "true" ]; then
+  buildOVA="true";
+fi
+
 # Setup
 [ "$UID" = "0" ] || EXIT_STATUS "Need to be root"
 mkdir -p "$mntDir" "$tmpDir" "$buildDir" &&
+rm "${buildDir}/iso.log" "${buildDir}/ova.log" 2>/dev/null
 
 # Unpack image
 mount -o loop "$isoFile" "$mntDir" &&
@@ -151,17 +173,17 @@ chroot "$mntDir" /opt/justbrowsing/cleanup2 2>/dev/null;
 chroot "$mntDir" df -h 2>/dev/null | grep /$;
 
 # Update changelog
-pkgLog="${mntDir}/root/README.md"
-nightlyHead="JustBrowsing Nightlies are untested, auto-built releases.\n=============\nNightly builds are based from the latest stable JustBrowsing release with the packages upgraded.\n\n\nChangelog:\n-------------"
-nightlyTail="\n\n- - -\n[Build scripts](https://github.com/justbrowsing/justbrowsing-remaster)\n[Homepage](http://justbrowsing.info)"
+changeLog="${mntDir}/root/README.md";
+nightlyHead="JustBrowsing Nightlies are untested, auto-built releases.\n=============\nNightly builds are based from the latest stable JustBrowsing release with the packages upgraded.\n\n\nChangelog:\n-------------";
+nightlyTail="\n\n- - -\n[Build scripts](https://github.com/justbrowsing/justbrowsing-remaster)\n[Homepage](http://justbrowsing.info)";
 echo "==> Packages upgraded:"
 chroot "$mntDir" /opt/justbrowsing/pkglist
 [ -f "${mntDir}/root/pkgs.diff" ] || EXIT_STATUS "ISO not upgraded"
-echo -e "$nightlyHead" > "$pkgLog"
-date +"+   "%Y%m%d_nightly >> "$pkgLog"
-cat "${mntDir}/root/pkgs.diff" >> "$pkgLog"
-echo -e "$nightlyTail" >> "$pkgLog"
-cp "$pkgLog" "$buildDir"
+echo -e "$nightlyHead" > "$changeLog"
+date +"+   "%Y%m%d_nightly >> "$changeLog"
+cat "${mntDir}/root/pkgs.log" >> "$changeLog"
+echo -e "$nightlyTail" >> "$changeLog"
+cp "$changeLog" "$buildDir"
 
 # Exit chroot
 umount "${mntDir}/var/cache" "${mntDir}/tmp" "${mntDir}/proc/" "${mntDir}/sys/" "${mntDir}/dev/pts" "${mntDir}/dev/"
@@ -178,25 +200,55 @@ if [[ "$input" != [Nn] ]]; then
   echo "==> Squash Image :: $squashImage" &&
   "$squashImage" "${tmpDir}/squashfs-root/root-image.fs" "$mntDir" --noconfirm &&
   echo "==> Convert to ISO  :: $sfs2ISO" &&
-  "$sfs2ISO" "$tmpDir" "${buildDir}/syslinux" --nightly | tee "${buildDir}/latest" &&
-  echo "[DONE]"; 
+  "$sfs2ISO" "$tmpDir" "${buildDir}/syslinux" --nightly | tee "${buildDir}/iso.log" &&
+  echo "[DONE]";
+else
+  CLEAN_UP; 
+  exit 0;
 fi
 
 # Cleanup
 CLEAN_UP
 
+# Build Virtualbox OVA
+if [ "$buildOVA" = "true" ]; then
+  read -t 5 -n 1 -p "==> Build OVA (Y/n): " input
+  echo "";
+  if [[ "$input" != [Nn] ]]; then
+    isoFile=$(grep "Successfully built:" "${buildDir}/iso.log" | awk '{print $NF}');
+    modprobe vboxdrv
+    echo "==> Convert to OVA :: $iso2OVA"
+    "$iso2OVA" "$isoFile" | tee "${buildDir}/ova.log" &&
+    echo "[DONE]";
+  fi
+fi
+
 # Upload
+read -t 5 -n 1 -p "==> Upload OVA (Y/n): " input
+echo "";
+if [[ "$input" != [Nn] ]]; then
+  ovaFile=$(grep "Successfully built:" "${buildDir}/ova.log" | awk '{print $NF}');
+  if [ "$buildOVA" = "true" -a -f "$ovaFile" ]; then
+    echo "==> scp $ovaFile justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Virtual/"
+    scp "$ovaFile" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Virtual/ &&
+    cp "${buildDir}/ova.log" "${buildDir}/latest-ova"
+  else
+    echo "==> Upload failed"
+  fi
+fi
+
 read -t 5 -n 1 -p "==> Upload ISO (Y/n): " input
 echo "";
 if [[ "$input" != [Nn] ]]; then
-  isoFile=$(grep "Successfully built:" "${buildDir}/latest" | awk '{print $NF}');
+  isoFile=$(grep "Successfully built:" "${buildDir}/iso.log" | awk '{print $NF}');
   if [ -f "$buildDir/README.md" -a -f "$isoFile" ]; then
     echo "==> scp $isoFile justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/"
     scp "$isoFile" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/ &&
     echo "==> scp $buildDir/README.md justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/"
-    scp "$buildDir/README.md" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/ 
+    scp "$buildDir/README.md" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/ &&
+    cp "${buildDir}/iso.log" "${buildDir}/latest"
   else
-    echo "Upload failed"
+    echo "==> Upload failed"
   fi
 fi
 
