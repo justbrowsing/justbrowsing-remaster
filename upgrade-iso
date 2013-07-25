@@ -1,7 +1,7 @@
 #!/bin/bash
 ####################
 ### upgrade-iso ####
-version="0.6" ######
+version="0.7" ######
 ### JustBrowsing ###
 ####################
 
@@ -110,6 +110,7 @@ sed -i 's/^Architecture =.*/Architecture = i686/g' "${mntDir}/etc/pacman.conf" &
 sed -i 's/^CheckSpace/#CheckSpace/g' "${mntDir}/etc/pacman.conf" &&
 cp "${mntDir}/etc/fstab.working" "${mntDir}/etc/fstab" &&
 cp "${mntDir}/etc/mtab.working" "${mntDir}/etc/mtab" &&
+cp "${mntDir}/etc/mkinitcpio.conf.install" "${mntDir}/etc/mkinitcpio.conf" &&
 
 mkdir "${buildDir}/var-cache"
 mkdir "${buildDir}/tmp-dir"
@@ -230,8 +231,17 @@ if [[ "$input" != [Nn] ]]; then
   ovaFile=$(grep "Successfully built:" "${buildDir}/ova.log" | awk '{print $NF}');
   if [ "$buildOVA" = "true" -a -f "$ovaFile" ]; then
     echo "==> scp $ovaFile justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Virtual/"
-    scp "$ovaFile" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Virtual/ &&
-    cp "${buildDir}/ova.log" "${buildDir}/latest-ova"
+    scp "$ovaFile" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Virtual/;
+    ovaStatus="$?";
+    if [ "$ovaStatus" != "0" ]; then
+      scp "$ovaFile" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Virtual/;
+      ovaStatus="$?";
+    fi
+    if [ "$ovaStatus" = "0" ]; then
+      cp "${buildDir}/ova.log" "${buildDir}/latest-ova"
+    else
+      echo "==> OVA Upload failed"
+    fi
   else
     echo "==> Upload failed"
   fi
@@ -245,8 +255,17 @@ if [[ "$input" != [Nn] ]]; then
     echo "==> scp $isoFile justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/"
     scp "$isoFile" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/ &&
     echo "==> scp $buildDir/README.md justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/"
-    scp "$buildDir/README.md" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/ &&
-    cp "${buildDir}/iso.log" "${buildDir}/latest"
+    scp "$buildDir/README.md" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/;
+    isoStatus="$?";
+    if [ "$isoStatus" != "0" ]; then
+      scp "$buildDir/README.md" justbrowsing@frs.sourceforge.net:/home/frs/project/justbrowsing/Nightlies/;
+      isoStatus="$?";
+    fi
+    if [ "$isoStatus" = "0" ]; then
+      cp "${buildDir}/iso.log" "${buildDir}/latest"
+    else
+      echo "==> ISO Upload failed"
+    fi
   else
     echo "==> Upload failed"
   fi
