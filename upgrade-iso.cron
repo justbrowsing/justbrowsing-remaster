@@ -1,0 +1,17 @@
+#!/bin/bash
+logfile="/var/log/upgrade-iso.log"
+timestamp=$(date +%Y%m%d);
+echo "=====> CRON $(date)" >> "$logfile"
+
+PATH="$PATH:/opt/justbrowsing"
+HOME="/root"
+scriptpath="/opt/justbrowsing/upgrade-iso"
+
+checkRunning=$(/usr/bin/pgrep "$scriptpath" 2>/dev/null);
+if [ -z "$checkRunning" ]; then
+  screen -dmSL upgrade-iso "$scriptpath" 2>&1 &&
+  echo "[SUCCESS]" >> "$logfile"
+  mv /root/screenlog.0 /opt/jb-build/justbrowsing_${timestamp}_nightly.log
+else
+  echo "upgrade-iso already running" >> "$logfile"
+fi
