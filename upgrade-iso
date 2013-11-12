@@ -1,7 +1,7 @@
 #!/bin/bash
 ####################
 ### upgrade-iso ####
-version="0.8" ######
+version="1.0" ######
 ### JustBrowsing ###
 ####################
 
@@ -11,6 +11,11 @@ tmpDir="/opt/jb-tmp"
 buildDir="/opt/jb-build"
 pkgDir="/opt/jb-pkg"
 enableOVA="true"
+force="false"
+upload="false"
+devMode="false"
+folderDir="Nightlies"
+flag="--nightly"
 
 
 EXIT_STATUS() { echo "ERROR: $@"; CLEAN_UP; exit 1; }
@@ -24,11 +29,29 @@ CLEAN_UP()
   umount "$mntDir" 2>/dev/null;
   rm -rf "$mntDir"
   rm -rf "$buildDir/syslinux"
-  rm -rf "$buildDir/var-cache"
+#  rm -rf "$buildDir/var-cache"
   rm -rf "$buildDir/tmp-dir"
   rm -rf "$tmpDir"
+  mount -o remount,gid=5,mode=620 /dev/pts
 }
 
+# Check force
+if [ "$1" = "--force" ]; then
+  echo -e "\033[1m:::::> Force flag enabled\033[0m";
+  shift; 
+  force="true";
+  isoFile=$(readlink -e "$@" 2>/dev/null);
+fi
+
+# Dev edition
+if [ "$1" = "--devedition" ]; then
+  echo -e "\033[1m:::::> Developer edition enabled\033[0m";
+  shift; 
+  devMode="true";
+  folderDir="DevEdition";
+  flag="--devedition";
+  isoFile=$(readlink -e "$@" 2>/dev/null);
+fi
 
 # Autobuild support
 if [ -z "$isoFile" ]; then
@@ -39,6 +62,7 @@ fi
 # Check depends
 checkISO=$(file "$isoFile" | awk -F ":" '{print $2}' | grep -o -e "ISO 9660" -e "x86 boot sector");
 ifSquash=$(which mksquashfs 2>/dev/null);
+ifFS=$(which rebuild-fs 2>/dev/null);
 ifImage=$(which squash-image 2>/dev/null);
 ifSfs=$(which sfs2iso 2>/dev/null);
 ifOVA=$(which iso2ova 2>/dev/null);
@@ -49,6 +73,14 @@ dirName=$(pwd);
 [ ! -z "$checkISO" ] || EXIT_STATUS "$isoFile not a valid ISO file";
 [ "$checkISO" = "x86 boot sector" ] && echo "==> Hybrid-ized ISO detected"
 [ ! -z "$ifSquash" ] || EXIT_STATUS "Package squashfs-tools missing"
+
+if [ ! -z "$ifFS" ]; then
+  rebuildFS="rebuild-fs";
+elif [ -f "$dirName/rebuild-fs" ]; then
+  rebuildFS="$dirName/squash-image";
+else
+  EXIT_STATUS "Script rebuild-fs missing";
+fi
 
 if [ ! -z "$ifImage" ]; then
   squashImage="squash-image";
@@ -99,9 +131,15 @@ echo "==> Unsquashed to $tmpDir" &&
 cd - > /dev/null &&
 cp "${mntDir}/arch/boot/i686/vmlinuz" "${tmpDir}/vmlinuz-linux" &&
 cp "${mntDir}/arch/boot/i686/archiso.img" "${tmpDir}/initramfs-linux.img" &&
+umount "$mntDir" &&
+
+# Expand image
+echo "==> Rebuild Image Filesystem :: $rebuildFS" &&
+mv "${tmpDir}/squashfs-root/root-image.fs" "${tmpDir}/squashfs-root/unclean-image.fs" &&
+"$rebuildFS" "${tmpDir}/squashfs-root/unclean-image.fs" "${tmpDir}/squashfs-root/root-image.fs" 2000 &&
+rm "${tmpDir}/squashfs-root/unclean-image.fs" &&
 
 # Mount image
-umount "$mntDir" &&
 mount "${tmpDir}/squashfs-root/root-image.fs" "$mntDir" &&
 echo "==> Mounted at: ${mntDir}" &&
 
@@ -148,13 +186,58 @@ if [ -d "$mntDir/${GCpath}-backup" ]; then
   chroot "$mntDir" mv "${GCpath}-backup" "$GCpath";
 fi
 
+## Upgrade packages
+#chroot "$mntDir" mkdir -p /var/cache/{apacman,pacman}/pkg
+#chroot "$mntDir" pacman -Sywu --noconfirm
+#for pkg in $(ls ${mntDir}/var/cache/pacman/pkg/); do 
+#  chroot "$mntDir" pacman -U /var/cache/pacman/pkg/$pkg --noconfirm; 
+#  chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null;
+#done
+
 # Upgrade packages
-chroot "$mntDir" mkdir -p /var/cache/{packer,pacman}/pkg
-chroot "$mntDir" pacman -Sywu --noconfirm
-for pkg in $(ls ${mntDir}/var/cache/pacman/pkg/); do 
-  chroot "$mntDir" pacman -U /var/cache/pacman/pkg/$pkg --noconfirm; 
-  chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null;
-done
+chroot "$mntDir" mkdir -p /var/cache/{apacman,pacman}/pkg
+chroot "$mntDir" pacman -Syu --noconfirm
+chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null;
+
+# Set login
+echo '#!/bin/bash' > "${mntDir}/tmp/setrandom"
+echo 'urandom=$(tr -dc A-Za-z0-9_ < /dev/urandom | head -c 128);' >> "${mntDir}/tmp/setrandom"
+echo 'echo "${urandom}" > /opt/justbrowsing/stock' >> "${mntDir}/tmp/setrandom"
+echo 'echo -e "${urandom}\n${urandom}" | passwd user 2>&1' >> "${mntDir}/tmp/setrandom"
+chroot "$mntDir" chmod +x /tmp/setrandom
+chroot "$mntDir" /tmp/setrandom
+chroot "$mntDir" rm /tmp/setrandom 2>/dev/null
+
+# Edition differences
+if [ "$devMode" = "true" ]; then
+  chroot "$mntDir" mv /etc/X11/xorg.conf.d/10-disableVTs.conf{,.devmode} 2>/dev/null
+  chroot "$mntDir" pacman -S xterm openssh sudo --noconfirm --needed
+  chroot "$mntDir" systemctl enable sshd
+  chroot "$mntDir" sed -i '$ abindsym $mod+Return exec xterm' "/home/user/.i3/config"
+  chroot "$mntDir" sed -i 's/# %wheel ALL=(ALL) NOPASSWD: ALL/%wheel ALL=(ALL) NOPASSWD: ALL/g' /etc/sudoers
+  cp "${buildDir}/devedition.png" "${buildDir}/syslinux/arch/boot/syslinux/splash.png"
+  echo -e '#!/bin/sh\ntimestamp=$(date +%Y%m%d);' > "${mntDir}/tmp/setkey"
+  echo 'echo -e "${timestamp}\n${timestamp}" | passwd root 2>&1' >> "${mntDir}/tmp/setkey"
+  chroot "$mntDir" chmod +x /tmp/setkey
+  chroot "$mntDir" /tmp/setkey
+else
+  chroot "$mntDir" passwd -l root
+  chroot "$mntDir" rm /tmp/setkey 2>/dev/null
+  cp "${buildDir}/splash.png" "${buildDir}/syslinux/arch/boot/syslinux/splash.png"
+  chroot "$mntDir" sed -i 's/^%wheel ALL=(ALL) NOPASSWD: ALL/# %wheel ALL=(ALL) NOPASSWD: ALL/g' /etc/sudoers 2>/dev/null
+  chroot "$mntDir" sed -i '/^bindsym $mod+Return exec xterm/d' "/home/user/.i3/config"
+  chroot "$mntDir" systemctl disable sshd 2>/dev/null
+  chroot "$mntDir" pacman -Rss xterm --noconfirm
+  chroot "$mntDir" pacman -Rss openssh --noconfirm
+  chroot "$mntDir" pacman -Rss sudo --noconfirm
+  chroot "$mntDir" mv /etc/X11/xorg.conf.d/10-disableVTs.{devmode,conf} 2>/dev/null
+fi
+
+read -t 5 -n 1 -p "==> Enter chroot (y/N): " input
+echo "";
+if [[ "$input" = [Yy] ]]; then
+  chroot "$mntDir" /bin/bash;
+fi
 
 # Generate initrd for livecd
 chroot "$mntDir" pacman -S archiso --noconfirm
@@ -167,8 +250,11 @@ chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null;
 chroot "$mntDir" df -h 2>/dev/null | grep /$;
 
 # Upgrade AUR
-chroot "$mntDir" apacman --auronly -Su --noconfirm;
+chroot "$mntDir" apacman -S apacman-deps --needed --noconfirm
+chroot "$mntDir" apacman --auronly -Su --needed --noconfirm;
+chroot "$mntDir" pacman -Rs apacman-deps --noconfirm
 chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null;
+umount "${mntDir}/var/cache"
 chroot "$mntDir" /opt/justbrowsing/cleanup2 2>/dev/null;
 chroot "$mntDir" df -h 2>/dev/null | grep /$;
 
@@ -178,7 +264,9 @@ nightlyHead="JustBrowsing Nightlies are untested, auto-built releases.\n========
 nightlyTail="\n\n- - -\n[Build scripts](https://github.com/justbrowsing/justbrowsing-remaster)\n[Homepage](http://justbrowsing.info)";
 echo "==> Packages upgraded:"
 chroot "$mntDir" /opt/justbrowsing/pkglist
-[ -f "${mntDir}/root/pkgs.diff" ] || EXIT_STATUS "ISO not upgraded"
+if [ "$force" != "true" ]; then
+  [ -f "${mntDir}/root/pkgs.diff" ] || EXIT_STATUS "ISO not upgraded"
+fi
 echo -e "$nightlyHead" > "$changeLog"
 date +"+   "%Y%m%d_nightly >> "$changeLog"
 cat "${mntDir}/root/pkgs.log" >> "$changeLog"
@@ -188,7 +276,7 @@ cp "$changeLog" "$buildDir"
 # Exit chroot
 umount "${mntDir}/var/cache" "${mntDir}/tmp" "${mntDir}/proc/" "${mntDir}/sys/" "${mntDir}/dev/pts" "${mntDir}/dev/"
 sed -i 's/^Architecture = i686/Architecture = auto/g' "${mntDir}/etc/pacman.conf"
-sed -i 's/^#CheckSpace/CheckSpace/g' "${mntDir}/etc/pacman.conf" 
+[ "$devMode" = "true" ] || sed -i 's/^#CheckSpace/CheckSpace/g' "${mntDir}/etc/pacman.conf" 
 rm "${mntDir}/etc/fstab" "${mntDir}/etc/mtab" 
 cp "${mntDir}/etc/resolv.conf.working" "${mntDir}/etc/resolv.conf"
 
@@ -197,12 +285,18 @@ read -t 5 -n 1 -p "==> Repack image (Y/n): " input
 echo "";
 if [[ "$input" != [Nn] ]]; then
   umount "$mntDir" &&
+  echo "==> Rebuild Image Filesystem :: $rebuildFS" &&
+  mv "${tmpDir}/squashfs-root/root-image.fs" "${tmpDir}/squashfs-root/unclean-image.fs" &&
+  "$rebuildFS" "${tmpDir}/squashfs-root/unclean-image.fs" "${tmpDir}/squashfs-root/root-image.fs" &&
+  rm "${tmpDir}/squashfs-root/unclean-image.fs" &&
   echo "==> Squash Image :: $squashImage" &&
   "$squashImage" "${tmpDir}/squashfs-root/root-image.fs" "$mntDir" --noconfirm &&
   echo "==> Convert to ISO  :: $sfs2ISO" &&
-  "$sfs2ISO" "$tmpDir" "${buildDir}/syslinux" --nightly | tee "${buildDir}/iso.log" &&
+  "$sfs2ISO" "$tmpDir" "${buildDir}/syslinux" "$flag" | tee "${buildDir}/iso.log" &&
   isoStatus="$?";
-  [ "$isoStatus" = "0" ] && cp "${buildDir}/iso.log" "${buildDir}/latest";
+  if [ "$devMode" != "true" ]; then
+    [ "$isoStatus" = "0" ] && cp "${buildDir}/iso.log" "${buildDir}/latest";
+  fi
   echo "[DONE]";
 else
   CLEAN_UP; 
@@ -222,46 +316,51 @@ if [ "$buildOVA" = "true" ]; then
     echo "==> Convert to OVA :: $iso2OVA"
     "$iso2OVA" "$isoFile" | tee "${buildDir}/ova.log" &&
     ovaStatus="$?";
-    [ "$ovaStatus" = "0" ] && cp "${buildDir}/ova.log" "${buildDir}/latest-ova";
+    if [ "$devMode" != "true" ]; then
+      [ "$ovaStatus" = "0" ] && cp "${buildDir}/ova.log" "${buildDir}/latest-ova";
+    fi
     echo "[DONE]";
   fi
 fi
 
 # Upload
-read -t 5 -n 1 -p "==> Upload (Y/n): " input
-echo "";
-if [[ "$input" != [Nn] ]]; then
+if [ "$upload" != "false" ]; then
 
-  ovaFile=$(grep "Successfully built:" "${buildDir}/ova.log" 2>/dev/null | awk '{print $NF}');
-  if [ "$buildOVA" = "true" -a -f "$ovaFile" ]; then
-    echo "==> rsync -avP -e ssh $ovaFile justbrowsing@frs.sourceforge.net:/home/frs/project/j/ju/justbrowsing/Virtual/"
-    rsync -avP -e ssh "$ovaFile" justbrowsing@frs.sourceforge.net:/home/frs/project/j/ju/justbrowsing/Virtual/;
-    ovaStatus="$?";
-    if [ "$ovaStatus" != "0" ]; then
+  read -t 5 -n 1 -p "==> Upload (Y/n): " input
+  echo "";
+  if [[ "$input" != [Nn] ]]; then
+  
+    ovaFile=$(grep "Successfully built:" "${buildDir}/ova.log" 2>/dev/null | awk '{print $NF}');
+    if [ "$buildOVA" = "true" -a -f "$ovaFile" ]; then
+      echo "==> rsync -avP -e ssh $ovaFile justbrowsing@frs.sourceforge.net:/home/frs/project/j/ju/justbrowsing/Virtual/"
       rsync -avP -e ssh "$ovaFile" justbrowsing@frs.sourceforge.net:/home/frs/project/j/ju/justbrowsing/Virtual/;
       ovaStatus="$?";
+      if [ "$ovaStatus" != "0" ]; then
+        rsync -avP -e ssh "$ovaFile" justbrowsing@frs.sourceforge.net:/home/frs/project/j/ju/justbrowsing/Virtual/;
+        ovaStatus="$?";
+      fi
+      [ "$ovaStatus" = "0" ] || echo "==> OVA Upload failed";
     fi
-    [ "$ovaStatus" = "0" ] || echo "==> OVA Upload failed";
-  fi
-
-  isoFile=$(grep "Successfully built:" "${buildDir}/iso.log" 2>/dev/null | awk '{print $NF}');
-  if [ -f "$buildDir/README.md" -a -f "$isoFile" ]; then
-    echo "==> rsync -avP -e ssh $isoFile justbrowsing@frs.sourceforge.net:/home/frs/project/j/ju/justbrowsing/Nightlies/"
-    rsync -avP -e ssh "$isoFile" justbrowsing@frs.sourceforge.net:/home/frs/project/j/ju/justbrowsing/Nightlies/;
-    isoStatus="$?";
-    if [ "$isoStatus" != "0" ]; then
-      rsync -avP -e ssh "$isoFile" justbrowsing@frs.sourceforge.net:/home/frs/project/j/ju/justbrowsing/Nightlies/;
+  
+    isoFile=$(grep "Successfully built:" "${buildDir}/iso.log" 2>/dev/null | awk '{print $NF}');
+    if [ -f "$buildDir/README.md" -a -f "$isoFile" ]; then
+      echo "==> rsync -avP -e ssh $isoFile justbrowsing@frs.sourceforge.net:/home/frs/project/j/ju/justbrowsing/${folderDir}/"
+      rsync -avP -e ssh "$isoFile" justbrowsing@frs.sourceforge.net:/home/frs/project/j/ju/justbrowsing/${folderDir}/;
       isoStatus="$?";
+      if [ "$isoStatus" != "0" ]; then
+        rsync -avP -e ssh "$isoFile" justbrowsing@frs.sourceforge.net:/home/frs/project/j/ju/justbrowsing/${folderDir}/;
+        isoStatus="$?";
+      fi
+      if [ "$isoStatus" = "0" ]; then
+        sleep 60;
+        echo "==> rsync -avP -e ssh $buildDir/README.md justbrowsing@frs.sourceforge.net:/home/frs/project/j/ju/justbrowsing/${folderDir}/"
+        rsync -avP -e ssh "$buildDir/README.md" justbrowsing@frs.sourceforge.net:/home/frs/project/j/ju/justbrowsing/${folderDir}/;
+      else
+        echo "==> ISO Upload failed";
+      fi
     fi
-    if [ "$isoStatus" = "0" ]; then
-      sleep 60;
-      echo "==> rsync -avP -e ssh $buildDir/README.md justbrowsing@frs.sourceforge.net:/home/frs/project/j/ju/justbrowsing/Nightlies/"
-      rsync -avP -e ssh "$buildDir/README.md" justbrowsing@frs.sourceforge.net:/home/frs/project/j/ju/justbrowsing/Nightlies/;
-    else
-      echo "==> ISO Upload failed";
-    fi
+  
   fi
-
 fi
 
 ### END ###
