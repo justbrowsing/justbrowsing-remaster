@@ -1,7 +1,7 @@
 #!/bin/bash
 ####################
 ### upgrade-iso ####
-version="1.1" ######
+version="1.3" ######
 ### JustBrowsing ###
 ####################
 
@@ -40,6 +40,14 @@ if [ "$1" = "--force" ]; then
   echo -e "\033[1m:::::> Force flag enabled\033[0m";
   shift; 
   force="true";
+  isoFile=$(readlink -e "$@" 2>/dev/null);
+fi
+
+# Stable
+if [ "$1" = "--stable" ]; then
+  echo -e "\033[1m:::::> Stable enabled\033[0m";
+  shift; 
+  unset flag;
   isoFile=$(readlink -e "$@" 2>/dev/null);
 fi
 
@@ -122,7 +130,7 @@ mkdir -p "${buildDir}/syslinux/arch/any" &&
 cp -r "${mntDir}/[BOOT]" "${mntDir}/EFI" "${mntDir}/isolinux" "${mntDir}/loader" "${buildDir}/syslinux/" &&
 cp "${mntDir}/arch"/{aitab,checksum.i686.md5,pkglist.i686.txt} "${buildDir}/syslinux/arch/" &&
 mkdir -p "${buildDir}/syslinux/arch/boot"/{i686,x86_64} &&
-cp -r "${mntDir}/arch/boot"/{memtest,memtest.COPYING,syslinux} "${buildDir}/syslinux/arch/boot/" &&
+cp -r "${mntDir}/arch/boot/syslinux" "${buildDir}/syslinux/arch/boot/" &&
 
 # Unsquash image
 cd "$tmpDir" &&
@@ -213,6 +221,7 @@ if [ "$devMode" = "true" ]; then
   chroot "$mntDir" mv /etc/X11/xorg.conf.d/10-disableVTs.conf{,.devmode} 2>/dev/null
   chroot "$mntDir" pacman -S xterm openssh sudo --noconfirm --needed
   chroot "$mntDir" systemctl enable sshd
+  chroot "$mntDir" sed -i '/^bindsym $mod+Return exec xterm/d' "/home/user/.i3/config"
   chroot "$mntDir" sed -i '$ abindsym $mod+Return exec xterm' "/home/user/.i3/config"
   chroot "$mntDir" sed -i 's/# %wheel ALL=(ALL) NOPASSWD: ALL/%wheel ALL=(ALL) NOPASSWD: ALL/g' /etc/sudoers
   cp "${buildDir}/devedition.png" "${buildDir}/syslinux/arch/boot/syslinux/splash.png"
@@ -233,21 +242,25 @@ else
   chroot "$mntDir" mv /etc/X11/xorg.conf.d/10-disableVTs.{devmode,conf} 2>/dev/null
 fi
 
-read -t 5 -n 1 -p "==> Enter chroot (y/N): " input
-echo "";
-if [[ "$input" = [Yy] ]]; then
-  chroot "$mntDir" /bin/bash;
-fi
-
 # Generate initrd for livecd
+cp "${tmpDir}/vmlinuz-linux" "${mntDir}/boot/vmlinuz-linux"
+cp "${tmpDir}/initramfs-linux.img" "${mntDir}/boot/initramfs-linux.img"
 chroot "$mntDir" pacman -S archiso --noconfirm
 chroot "$mntDir" pacman -Su --noconfirm
 cp "${mntDir}/etc/mkinitcpio.conf.livecd" "${mntDir}/etc/mkinitcpio.conf"
 chroot "$mntDir" mkinitcpio -p linux
 cp "${mntDir}/boot/vmlinuz-linux" "${tmpDir}/vmlinuz-linux"
 cp "${mntDir}/boot/initramfs-linux.img" "${tmpDir}/initramfs-linux.img"
+cp "${mntDir}/boot/initramfs-linux-fallback.img" "${tmpDir}/initramfs-linux-fallback.img"
 chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null;
 chroot "$mntDir" df -h 2>/dev/null | grep /$;
+
+# Enter choot again
+read -t 5 -n 1 -p "==> Enter chroot (y/N): " input
+echo "";
+if [[ "$input" = [Yy] ]]; then
+  chroot "$mntDir" /bin/bash;
+fi
 
 # Upgrade AUR
 chroot "$mntDir" apacman -S apacman-deps --needed --noconfirm
@@ -272,6 +285,11 @@ date +"+   "%Y%m%d_nightly >> "$changeLog"
 cat "${mntDir}/root/pkgs.log" >> "$changeLog"
 echo -e "$nightlyTail" >> "$changeLog"
 cp "$changeLog" "$buildDir"
+
+# Cleanup /boot
+rm "${mntDir}/boot/vmlinuz-linux" 2>/dev/null;
+rm "${mntDir}/boot/initramfs-linux.img" 2>/dev/null;
+rm "${mntDir}/boot/initramfs-linux-fallback.img" 2>/dev/null;
 
 # Exit chroot
 umount "${mntDir}/var/cache" "${mntDir}/tmp" "${mntDir}/proc/" "${mntDir}/sys/" "${mntDir}/dev/pts" "${mntDir}/dev/"

@@ -1,7 +1,7 @@
 #!/bin/bash
 ####################
 ### sfs2iso ########
-version="0.3" ######
+version="0.4" ######
 ### JustBrowsing ###
 ####################
 
@@ -39,12 +39,12 @@ cp "$squashDir"/vmlinuz-linux "$buildDir"/arch/boot/i686/vmlinuz || exit_status 
 if [ ! -f "${buildDir}/arch/boot/i686/archiso.img" ]; then
   if [ -f "${squashDir}/initramfs-linux.img" ]; then
     cp "${squashDir}/initramfs-linux.img" "$buildDir"/arch/boot/i686/archiso.img || exit_status "Cannot copy i686 initrd"
+    cp "${squashDir}/initramfs-linux-fallback.img" "$buildDir"/arch/boot/i686/archiso-fallback.img;
   else
     cp "$squashDir"/archiso.img "$buildDir"/arch/boot/i686/archiso.img || exit_status "Cannot copy i686 initrd"
+    cp "$squashDir"/archiso-fallback.img "$buildDir"/arch/boot/i686/archiso-fallback.img;
   fi
 fi
-
-
 
 # Build ISO
 cd "$buildDir"
@@ -52,6 +52,7 @@ cd "$buildDir"
 # Add timestamp
 sed -i "s/^JustBrowsing.*/JustBrowsing $timestamp/g" arch/boot/syslinux/archiso_firefox.cfg
 sed -i "s/^JustBrowsing.*/JustBrowsing $timestamp/g" arch/boot/syslinux/archiso_chrome.cfg
+sed -i "s/^JustBrowsing.*/JustBrowsing $timestamp/g" arch/boot/syslinux/archiso_vbox.cfg
 sed -i "s/^JustBrowsing.*/JustBrowsing $timestamp/g" arch/boot/syslinux/archiso_vmware.cfg
 
 [ -f "isolinux/isolinux.bin" -a -f "isolinux/boot.cat" ] || exit_status "Wrong directory";

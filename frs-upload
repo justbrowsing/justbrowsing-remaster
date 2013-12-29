@@ -1,0 +1,77 @@
+#!/bin/bash
+####################
+### frs-upload #####
+version="0.2" ######
+### JustBrowsing ###
+####################
+
+release="$1";
+buildDir="/opt/jb-build"
+
+userName="justbrowsing"
+projName="justbrowsing"
+alphaOne="j"
+alphaTwo="ju"
+
+UPLOAD_OVA()
+{
+  ovaFile="${buildDir}/${projName}_${release}${1}.ova"
+  echo "==> Uploading $ovaFile"
+  if [ -f "$ovaFile" ]; then
+    echo "==> rsync -avP -e ssh $ovaFile ${userName}@frs.sourceforge.net:/home/frs/project/${alphaOne}/${alphaTwo}/${folderDir}/"
+    rsync -avP -e ssh "$ovaFile" ${userName}@frs.sourceforge.net:/home/frs/project/${alphaOne}/${alphaTwo}/${folderDir}/;
+    ovaStatus="$?";
+    if [ "$ovaStatus" != "0" ]; then
+      rsync -avP -e ssh "$ovaFile" ${userName}@frs.sourceforge.net:/home/frs/project/${alphaOne}/${alphaTwo}/${folderDir}/;
+      ovaStatus="$?";
+    fi
+    [ "$ovaStatus" = "0" ] || echo "==> OVA Upload failed";
+  fi
+}
+
+UPLOAD_ISO()
+{  
+  isoFile="${buildDir}/${projName}_${release}${1}.iso"
+  echo "==> Uploading $isoFile"
+  if [ -f "$isoFile" ]; then
+    echo "==> rsync -avP -e ssh $isoFile ${userName}@frs.sourceforge.net:/home/frs/project/${alphaOne}/${alphaTwo}/${folderDir}/"
+    rsync -avP -e ssh "$isoFile" ${userName}@frs.sourceforge.net:/home/frs/project/${alphaOne}/${alphaTwo}/${folderDir}/;
+    isoStatus="$?";
+    if [ "$isoStatus" != "0" ]; then
+      rsync -avP -e ssh "$isoFile" ${userName}@frs.sourceforge.net:/home/frs/project/${alphaOne}/${alphaTwo}/${folderDir}/;
+      isoStatus="$?";
+    fi
+    [ "$isoStatus" = "0" ] || echo "==> ISO Upload failed";
+  fi
+}
+
+UPLOAD_README()
+{
+    if [ "$isoStatus" = "0" ]; then
+      sleep 60;
+      echo "==> rsync -avP -e ssh $buildDir/README.md ${userName}@frs.sourceforge.net:/home/frs/project/${alphaOne}/${alphaTwo}/${folderDir}/"
+      rsync -avP -e ssh "$buildDir/README.md" ${userName}@frs.sourceforge.net:/home/frs/project/${alphaOne}/${alphaTwo}/${folderDir}/;
+    else
+      echo "==> ISO Upload failed";
+    fi
+}
+
+
+# Sanity check
+if [[ "$release" != [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9] ]]; then
+  echo "ERROR: invalid date";
+  exit 1;
+fi
+
+# Upload OVA images
+[[ $@ = *dev* ]] && folderDir="${projName}/Virtual" && UPLOAD_OVA "_dev"
+[[ $@ = *nightly* ]] && folderDir="${projName}/Virtual" && UPLOAD_OVA "_nightly"
+[[ $@ = *stable* ]] && folderDir="${projName}/Virtual" && UPLOAD_OVA
+
+# Upload ISO images
+[[ $@ = *dev* ]] && folderDir="${projName}/DevEdition" && UPLOAD_ISO "_dev"
+[[ $@ = *nightly* ]] && folderDir="${projName}/Nightlies" && UPLOAD_ISO "_nightly"
+[[ $@ = *stable* ]] && folderDir="${projName}" && UPLOAD_ISO
+
+
+### END ###
