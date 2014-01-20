@@ -1,7 +1,7 @@
 #!/bin/bash
 ####################
 ### upgrade-iso ####
-version="1.3" ######
+version="1.4" ######
 ### JustBrowsing ###
 ####################
 
@@ -29,11 +29,19 @@ CLEAN_UP()
   umount "$mntDir" 2>/dev/null;
   rm -rf "$mntDir"
   rm -rf "$buildDir/syslinux"
-#  rm -rf "$buildDir/var-cache"
   rm -rf "$buildDir/tmp-dir"
   rm -rf "$tmpDir"
   mount -o remount,gid=5,mode=620 /dev/pts
 }
+
+
+# Check upload
+if [ "$1" = "--upload" ]; then
+  echo -e "\033[1m:::::> Upload flag enabled\033[0m";
+  shift;
+  upload="true";
+  isoFile=$(readlink -e "$@" 2>/dev/null);
+fi
 
 # Check force
 if [ "$1" = "--force" ]; then
@@ -74,6 +82,7 @@ ifFS=$(which rebuild-fs 2>/dev/null);
 ifImage=$(which squash-image 2>/dev/null);
 ifSfs=$(which sfs2iso 2>/dev/null);
 ifOVA=$(which iso2ova 2>/dev/null);
+ifFRS=$(which frs-upload 2>/dev/null);
 ifVBOX=$(which VBoxManage 2>/dev/null);
 dirName=$(pwd);
 
@@ -112,6 +121,14 @@ elif [ -f "$dirName/iso2ova" ]; then
   iso2OVA="$dirName/iso2ova";
 else
   enableOVA="false";
+fi
+
+if [ ! -z "$ifFRS" ]; then
+  frsUpload="frs-upload";
+elif [ -f "$dirName/frs-upload" ]; then
+  frsUpload="$dirName/frs-upload";
+else
+  upload="false";
 fi
 
 if [ ! -z "$ifVBOX" -a "$enableOVA" = "true" ]; then
@@ -158,7 +175,7 @@ cp "${mntDir}/etc/fstab.working" "${mntDir}/etc/fstab" &&
 cp "${mntDir}/etc/mtab.working" "${mntDir}/etc/mtab" &&
 cp "${mntDir}/etc/mkinitcpio.conf.install" "${mntDir}/etc/mkinitcpio.conf" &&
 
-mkdir "${buildDir}/var-cache"
+mkdir "${buildDir}/var-cache" 2>/dev/null
 mkdir "${buildDir}/tmp-dir"
 mount -o bind,exec,rw "${buildDir}/var-cache" "${mntDir}/var/cache"
 mount -o bind,exec,rw "${buildDir}/tmp-dir" "${mntDir}/tmp"
@@ -171,8 +188,11 @@ mount -t proc proc "${mntDir}/proc/"
 mount -t sysfs sys "${mntDir}/sys/"
 mount -o bind /dev "${mntDir}/dev/"
 mount -t devpts pts "${mntDir}/dev/pts"
+mount -o remount,gid=5,mode=620 /dev/pts
 cp "${mntDir}/etc/resolv.conf" "${mntDir}/etc/resolv.conf.working"
 cp /etc/resolv.conf "${mntDir}/etc/resolv.conf"
+cp "${tmpDir}/vmlinuz-linux" "${mntDir}/boot/vmlinuz-linux"
+cp "${tmpDir}/initramfs-linux.img" "${mntDir}/boot/initramfs-linux.img"
 
 read -t 5 -n 1 -p "==> Enter chroot (y/N): " input
 echo "";
@@ -194,14 +214,6 @@ if [ -d "$mntDir/${GCpath}-backup" ]; then
   chroot "$mntDir" mv "${GCpath}-backup" "$GCpath";
 fi
 
-## Upgrade packages
-#chroot "$mntDir" mkdir -p /var/cache/{apacman,pacman}/pkg
-#chroot "$mntDir" pacman -Sywu --noconfirm
-#for pkg in $(ls ${mntDir}/var/cache/pacman/pkg/); do 
-#  chroot "$mntDir" pacman -U /var/cache/pacman/pkg/$pkg --noconfirm; 
-#  chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null;
-#done
-
 # Upgrade packages
 chroot "$mntDir" mkdir -p /var/cache/{apacman,pacman}/pkg
 chroot "$mntDir" pacman -Syu --noconfirm
@@ -220,7 +232,7 @@ chroot "$mntDir" rm /tmp/setrandom 2>/dev/null
 if [ "$devMode" = "true" ]; then
   chroot "$mntDir" mv /etc/X11/xorg.conf.d/10-disableVTs.conf{,.devmode} 2>/dev/null
   chroot "$mntDir" pacman -S xterm openssh sudo --noconfirm --needed
-  chroot "$mntDir" systemctl enable sshd
+  chroot "$mntDir" ln -s /usr/lib/systemd/sshd.service /etc/systemd/system/multi-user.target.wants/sshd.service
   chroot "$mntDir" sed -i '/^bindsym $mod+Return exec xterm/d' "/home/user/.i3/config"
   chroot "$mntDir" sed -i '$ abindsym $mod+Return exec xterm' "/home/user/.i3/config"
   chroot "$mntDir" sed -i 's/# %wheel ALL=(ALL) NOPASSWD: ALL/%wheel ALL=(ALL) NOPASSWD: ALL/g' /etc/sudoers
@@ -243,8 +255,6 @@ else
 fi
 
 # Generate initrd for livecd
-cp "${tmpDir}/vmlinuz-linux" "${mntDir}/boot/vmlinuz-linux"
-cp "${tmpDir}/initramfs-linux.img" "${mntDir}/boot/initramfs-linux.img"
 chroot "$mntDir" pacman -S archiso --noconfirm
 chroot "$mntDir" pacman -Su --noconfirm
 cp "${mntDir}/etc/mkinitcpio.conf.livecd" "${mntDir}/etc/mkinitcpio.conf"
