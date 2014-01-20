@@ -1,7 +1,7 @@
 #!/bin/bash
 ####################
 ### upgrade-iso ####
-version="1.4" ######
+version="1.5" ######
 ### JustBrowsing ###
 ####################
 
@@ -34,6 +34,14 @@ CLEAN_UP()
   mount -o remount,gid=5,mode=620 /dev/pts
 }
 
+
+# Check interactive
+if [ "$1" = "-i" ]; then
+  echo -e "\033[1m:::::> Interactive flag enabled\033[0m";
+  shift;
+  interactive="true";
+  isoFile=$(readlink -e "$@" 2>/dev/null);
+fi
 
 # Check upload
 if [ "$1" = "--upload" ]; then
@@ -196,6 +204,7 @@ cp "${tmpDir}/initramfs-linux.img" "${mntDir}/boot/initramfs-linux.img"
 
 read -t 5 -n 1 -p "==> Enter chroot (y/N): " input
 echo "";
+[ "$interactive" = "true" ] && input="Y"
 if [[ "$input" = [Yy] ]]; then
   chroot "$mntDir" /bin/bash;
 fi
@@ -268,6 +277,7 @@ chroot "$mntDir" df -h 2>/dev/null | grep /$;
 # Enter choot again
 read -t 5 -n 1 -p "==> Enter chroot (y/N): " input
 echo "";
+[ "$interactive" = "true" ] && input="Y"
 if [[ "$input" = [Yy] ]]; then
   chroot "$mntDir" /bin/bash;
 fi
