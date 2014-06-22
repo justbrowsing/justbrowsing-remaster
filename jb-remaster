@@ -1,21 +1,18 @@
 #!/bin/bash
 ###################
 ### jb-remaster ###
-version="0.1" #####
+version="0.4" #####
 ### JustBrowsing ##
 ###################
 
-isoFile=$(readlink -e "$@" 2>/dev/null);
+[ "$1" = "--extract" ] && action="extract" && shift
+[ "$1" = "--rebuild" ] && action="rebuild" && shift
+inputFile=$(readlink -e "$@" 2>/dev/null)
 mntDir="/opt/remaster-iso"
 tmpDir="/opt/remaster-tmp"
 buildDir="/opt/remaster-build"
-imgFile="${tmpDir}/remaster.img"
-imgSize="3000" #MB
-sectorStart="2048"
-sectorEnd="307200"
-#partSize="730" #MB
-#sectorMax="2437119"
-#sectorEnd=$((sectorMax-sectorStart-partSize*2048))
+squashDir="$buildDir/squashfs-root"
+isoDir="$buildDir/ISO"
 
 
 EXIT_STATUS() { echo "ERROR: $@"; CLEAN_UP; exit 1; }
@@ -28,101 +25,190 @@ CLEAN_UP()
   umount "$mntDir" 2>/dev/null;
 }
 
-SENDKEY_FDISK() {
-  for cmd in $@; do
-    if [ "$cmd" = "ENTER" ]; then
-      echo -ne "\n"
-    else
-      echo -ne "${cmd}\n"
-    fi
-  done
+EXTRACT_DEPENDS() {
+  isoFile="$inputFile"
+  checkISO=$(file -F "|" "$isoFile" | awk -F "|" '{print $2}' | grep -o -e "ISO 9660" -e "x86 boot sector" -e "DOS/MBR boot")
+  isoVersion=$(echo "$isoFile" | awk -F "/" '{print $NF}')
+  [ ! -z "$isoFile" ] || EXIT_STATUS "USAGE: $0 {[none]|extract} [ISO file]"
+  [ -f "$isoFile" ] || EXIT_STATUS "file $isoFile does not exist"
+  [ ! -z "$checkISO" ] || EXIT_STATUS "$isoFile not a valid ISO file"
+  [ ! -z "$checkISO" ] && echo "==> Hybrid-ized ISO detected"
+  
+  ifQEMU64=$(which qemu-system-x86_64 2>/dev/null)
+  ifQEMU32=$(which qemu-system-i386 2>/dev/null)
+  arch=$(uname -m)
+  if [ ! -z "$ifQEMU64" -a "$arch" = "x86_64" ]; then
+    QEMU="qemu-system-x86_64";
+  elif [ ! -z "$ifQEMU32" -a "$arch" = "i686" ]; then
+    QEMU="qemu-system-i386";
+  else
+    EXIT_STATUS "$arch: unsupported architecture";
+  fi
 }
 
-# Check depends
-checkISO=$(file "$isoFile" | awk -F ":" '{print $2}' | grep -o -e "ISO 9660" -e "x86 boot sector" -e "DOS/MBR boot");
-isoVersion=$(echo "$isoFile" | awk -F "/" '{print $NF}');
-[ ! -z "$isoFile" ] || EXIT_STATUS "USAGE: $0 [ISO file]"
-[ -f "$isoFile" ] || EXIT_STATUS "file $isoFile does not exist"
-[ ! -z "$checkISO" ] || EXIT_STATUS "$isoFile not a valid ISO file"
-[ ! -z "$checkISO" ] && echo "==> Hybrid-ized ISO detected"
+EXTRACT_IMG() {
+  # Setup
+  echo "--> Extracting"
+  EXTRACT_DEPENDS
+  [ "$UID" = "0" ] || EXIT_STATUS "Need to be root"
+  rm -rf "$mntDir" "$tmpDir/squashfs-root" 2>/dev/null || EXIT_STATUS "unable to remove directories"
+  mkdir -p "$mntDir" "$buildDir" "$tmpDir" || EXIT_STAUTS "unable to create directories"
+  
+  # Unpack image
+  mount -o loop -t iso9660 "$isoFile" "$mntDir" &&
+  echo "==> Mounted $isoFile : $mntDir"
 
-ifQEMU64=$(which qemu-system-x86_64 2>/dev/null);
-ifQEMU32=$(which qemu-system-i386 2>/dev/null);
-arch=$(uname -m);
-if [ ! -z "$ifQEMU64" -a "$arch" = "x86_64" ]; then
-  QEMU="qemu-system-x86_64";
-elif [ ! -z "$ifQEMU32" -a "$arch" = "i686" ]; then
-  QEMU="qemu-system-i386";
+  machine="i686"
+  [ -f "${mntDir}/arch/pkglist.x86_64.txt" ] && machine="x86_64"
+
+  mkdir -p "${isoDir}/arch/any" &&
+  cp -r "${mntDir}/[BOOT]" "${mntDir}/EFI" "${mntDir}/isolinux" "${mntDir}/loader" "${isoDir}/" &&
+  cp "${mntDir}/arch/aitab" "${isoDir}/arch/" &&
+  cp "${mntDir}/arch/checksum.${machine}.md5" "${isoDir}/arch/" &&
+  cp "${mntDir}/arch/pkglist.${machine}.txt" "${isoDir}/arch/" &&
+  mkdir -p ${isoDir}/arch/boot/{i686,x86_64} &&
+  cp -r "${mntDir}/arch/boot/syslinux" "${isoDir}/arch/boot/"
+  cp -v "${mntDir}/arch/flavor.jb" "${isoDir}/arch/" 
+  
+  # Unsquash image
+  [ -f "${mntDir}/arch/any/root-image.fs.sfs" ] || EXIT_STATUS "squashed filesystem not found"
+  cd "$tmpDir" &&
+  unsquashfs "${mntDir}/arch/any/root-image.fs.sfs" &&
+  echo "==> Unsquashed to $buildDir" &&
+  cd - > /dev/null &&
+  cp ${mntDir}/arch/boot/${machine}/{vmlinuz,archiso.img} "$tmpDir"
+  umount "$mntDir"
+  
+  # Mount filesystem
+  imgFile="${tmpDir}/squashfs-root/root-image.fs"
+  mount "$imgFile" "$mntDir" || EXIT_STATUS "unable to mount root-image.fs to ${mntDir}"
+  echo "/dev/sda / ext4 noatime 0 1" > "${mntDir}/etc/fstab" &&
+  echo "==> Created fstab"
+  cp "${tmpDir}/vmlinuz" "${mntDir}/boot/vmlinuz-linux"
+  cp "${tmpDir}/archiso.img" "${mntDir}/boot/initramfs-linux.img"
+
+tee "${mntDir}/etc/mkinitcpio.d/install.preset" <<'###'
+  ALL_config="/etc/mkinitcpio.conf.install"
+  ALL_kver="/boot/vmlinuz-linux"
+  PRESETS=('default' 'fallback')
+  default_image="/boot/initramfs-install.img"
+  fallback_image="/boot/initramfs-install-fallback.img"
+  fallback_options="-S autodetect"
+###
+
+  arch-chroot "$mntDir" mkinitcpio -p install
+  cp "${mntDir}/boot/initramfs-install-fallback.img" "${tmpDir}/initramfs-linux-fallback.img"
+  sync
+  echo "==> Regenerated initrd"
+  umount "$mntDir"
+  chmod 777 "$imgFile"
+  touch "${buildDir}/${isoVersion}.release"
+}
+
+LAUNCH_QEMU() {
+  echo "==> Launch QEMU"
+  params="root=/dev/sda rw quiet splash default=firefox gpu=vmware display=1366x768"
+  options="-m 2000M -enable-kvm -vga vmware -usbdevice tablet"
+  echo "$QEMU ${options} -hda ${imgFile} -kernel ${tmpDir}/vmlinuz -initrd ${tmpDir}/initramfs-linux-fallback.img -append '${params}'"
+}
+
+REBUILD_DEPENDS() {
+  echo "--> Rebuilding"
+  ddFile="$inputFile"
+  checkIMG=$(file "$ddFile" 2>/dev/null | grep -o "ext2 filesystem")
+  ifSquash=$(which mksquashfs 2>/dev/null)
+  ifFS=$(which rebuild-fs 2>/dev/null)
+  ifImage=$(which squash-image 2>/dev/null)
+  ifSfs=$(which sfs2iso 2>/dev/null)
+
+  [ ! -z "$ddFile" ] || EXIT_STATUS "USAGE: $0 --rebuild [fs file]"
+  [ -f "$ddFile" ] || EXIT_STATUS "file $ddFile does not exist"
+  [ ! -z "$checkIMG" ] || EXIT_STATUS "$ddFile not a valid filesystem image"
+  [ ! -z "$ifSquash" ] || EXIT_STATUS "Package squashfs-tools missing"
+
+  if [ ! -z "$ifFS" ]; then
+    rebuildFS="rebuild-fs";
+  elif [ -f "$dirName/rebuild-fs" ]; then
+    rebuildFS="$dirName/squash-image";
+  else
+    EXIT_STATUS "Script rebuild-fs missing";
+  fi
+  
+  if [ ! -z "$ifImage" ]; then
+    squashImage="squash-image";
+  elif [ -f "$dirName/squash-image" ]; then
+    squashImage="$dirName/squash-image";
+  else
+    EXIT_STATUS "Script squash-image missing";
+  fi
+  
+  if [ ! -z "$ifSfs" ]; then
+    sfs2ISO="sfs2iso";
+  elif [ -f "$dirName/sfs2iso" ]; then
+    sfs2ISO="$dirName/sfs2iso";
+  else
+    EXIT_STATUS "Script sfs2iso missing";
+  fi
+}
+
+REBUILD_IMG() {
+  # Setup
+  REBUILD_DEPENDS
+  [ "$UID" = "0" ] || EXIT_STATUS "Need to be root"
+  rm -rf "$mntDir" "$squashDir" "${buildDir}/root-image.fs.sfs" "${isoDir}/arch/any/root-image.fs.sfs" 2>/dev/null || EXIT_STATUS "unable to remove directories"
+  mkdir -p "$buildDir" "$mntDir" "$tmpDir" "$squashDir" ${isoDir}/arch/{any,i686,x86_64} || EXIT_STAUTS "unable to create directories"
+
+  # Look up distro name
+  [ -d "$isoDir" ] || EXIT_STATUS "missing syslinux directory: $isoDir"
+  distroName="JustBrowsing"
+  configEntry="${buildDir}/arch/flavor.jb"
+  [ -f "$configEntry" ] && distroName=$(grep -o "distroName\S*" "$configEntry" | sed 's/^distroName=//')
+  label=$(echo "$distroName" | tr -cd '[:alnum:]\n' | tr 'A-Z' 'a-z');
+
+  # Copy kernel and initrd
+  mount -o ro "$ddFile" "$mntDir" || EXIT_STATUS "unable to mount fs"
+  kernel="${mntDir}/boot/vmlinuz-linux"
+  initrd="${mntDir}/boot/initramfs-linux.img"
+  [ -f "$kernel" ] || EXIT_STATUS "missing kernel"
+  machine=$(file "$kernel" 2>/dev/null | awk -F ":" '{$1=""; print $0}' | grep -o -e i686 -e x86_64)
+  cp "$kernel" "${buildDir}/vmlinuz-linux" &&
+  echo "==> Copied kernel to ${buildDir}"
+  [ -f "$initrd" ] || EXIT_STATUS "missing initrd"
+  cp "$initrd" "${buildDir}/initramfs-linux.img" &&
+  echo "==> Copied initrd to ${buildDir}"
+  umount "$mntDir"
+
+  # Resize image 
+  cd "$tmpDir"
+  fsImage="$squashDir/root-image.fs"
+  echo "==> Rebuild Image Filesystem :: $rebuildFS" &&
+  "$rebuildFS" "$ddFile" "$fsImage" &&
+  echo "==> Repairing Image Filesystem :: $label" &&
+  e2fsck -p "$fsImage" &&
+  e2label "$fsImage" "$label" &&
+
+  # Convert image
+  echo "==> Squash Image :: $squashImage" &&
+  "$squashImage" "$fsImage" "$mntDir" --noconfirm &&
+  echo "==> Convert to ISO :: $sfs2ISO" &&
+  "$sfs2ISO" "$buildDir" "$isoDir" --tweak
+  isoStatus="$?"
+  echo "==> ISO status :: $isoStatus"
+}
+
+
+# Actions
+if [ "$action" = "extract" ]; then
+  EXTRACT_IMG
+  LAUNCH_QEMU
+  CLEAN_UP
+elif [ "$action" = "rebuild" ]; then
+  REBUILD_IMG
+  CLEAN_UP
 else
-  EXIT_STATUS "$arch: unsupported architecture";
+  echo "USAGE: $0 {[none]|--extract} [ISO file]"; 
+  echo "USAGE: $0 --rebuild [fs file]";
+  exit 1;
 fi
-
-# Setup
-[ "$UID" = "0" ] || EXIT_STATUS "Need to be root"
-rm -rf "$mntDir" "$tmpDir" "$buildDir" 2>/dev/null || EXIT_STATUS "unable to remove directories"
-mkdir -p "$mntDir" "$tmpDir" "$buildDir" || EXIT_STAUTS "unable to create directories"
-
-# Unpack image
-mount -o loop -t iso9660 "$isoFile" "$mntDir" &&
-echo "==> Mounted $isoFile : $mntDir"
-mkdir -p "${tmpDir}/syslinux/arch/any" &&
-cp -r "${mntDir}/[BOOT]" "${mntDir}/EFI" "${mntDir}/isolinux" "${mntDir}/loader" "${tmpDir}/syslinux/" &&
-cp "${mntDir}/arch"/{aitab,checksum.i686.md5,pkglist.i686.txt} "${tmpDir}/syslinux/arch/" &&
-mkdir -p "${tmpDir}/syslinux/arch/boot"/{i686,x86_64} &&
-cp -r "${mntDir}/arch/boot/syslinux" "${tmpDir}/syslinux/arch/boot/"
-
-# Unsquash image
-[ -f "${mntDir}/arch/any/root-image.fs.sfs" ] || EXIT_STATUS "squashed filesystem not found"
-cd "$tmpDir" &&
-unsquashfs "${mntDir}/arch/any/root-image.fs.sfs" &&
-echo "==> Unsquashed to $tmpDir" &&
-cd - > /dev/null &&
-cp "${mntDir}/arch/boot/i686/vmlinuz" "${tmpDir}/vmlinuz-linux" &&
-cp "${mntDir}/arch/boot/i686/archiso.img" "${tmpDir}/initramfs-linux.img" &&
-umount "$mntDir"
-
-# Create virtual HDD
-#qemu-img create -f qcow2 "$imgFile" "${imgSize}M" &&
-echo "==> Created $imgFile (${imgSize}MB)" &&
-dd if=/dev/zero of="$imgFile" bs=1MB count="$imgSize" &&
-chmod 777 "$imgFile"
-parted -s -a optimal "$imgFile"
-parted -s "$imgFile" mklabel msdos
-
-# Create new partitions
-echo "==> Create 1st partition"
-SENDKEY_FDISK "n p 1 ${sectorStart} ${sectorEnd} t ef w" | fdisk "$imgFile"
-echo "==> Create 2nd partition"
-SENDKEY_FDISK "n p 2 ENTER ENTER a 2 p w" | fdisk "$imgFile"
-
-# Create device maps
-echo "==> Create device maps"
-kpartx -v -s -a "$imgFile"
-partDATA=$(kpartx -l "$imgFile" | awk '{print $1}' | awk NR==1 | sed 's|^|/dev/mapper/|');
-partJB=$(kpartx -l "$imgFile" | awk '{print $1}' | awk NR==2 | sed 's|^|/dev/mapper/|');
-[ -b "$partDATA" ] || EXIT_STATUS "unable to find ${partDATA} partition"
-[ -b "$partJB" ] || EXIT_STATUS "unable to find ${partJB} partition"
-
-# Format filesystems
-echo "==> Formatting FAT32 partition"
-mkfs.vfat -n "JUSTDATA" "$partDATA"
-echo "==> Formatting EXT4 partition"
-mkfs.ext4 -L "justbrowsing" "$partJB"
-
-# Mount filesystems
-mount "${tmpDir}/squashfs-root/root-image.fs" "$mntDir" || EXIT_STATUS "unable to mount root-image.fs to ${mntDir}"
-mount "$partJB" "$buildDir" || EXIT_STATUS "unable to mount ${partJB} to ${buildDir}"
-
-# Clone
-echo "==> Unpacking filesystem"
-tar -C "$mntDir" -cpf - . | tar -C "$buildDir" -xf -
-touch "${buildDir}/${isoVersion}.release"
-sync
-umount "$mntDir" 
-#umount "$buildDir"
-#kpartx -d /dev/loop0
-
-# Cleanup
-CLEAN_UP
 
 ### END ###
