@@ -1,19 +1,21 @@
 #!/bin/bash
 ####################
 ### rebuild-fs #####
-version="0.1" ######
+version="0.3" ######
 ### JustBrowsing ###
 ####################
 
 oldImage=$(readlink -e "$1");
 newImage="$2"
+minSize="$3"
 
 oldMount="/opt/jb-old-mnt"
 newMount="/opt/jb-new-mnt"
 buffer="75000"
 
 label="jb"
-imgSize="1500"
+imgSize="1500" # in MB
+imgSize=$((imgSize*1000)); # in K
 
 # Functions
 EXIT_STATUS() { echo -e "\033[1m:::::> ERROR: $@\033[0m"; CLEAN_UP; exit 1; }
@@ -21,8 +23,11 @@ EXIT_STATUS() { echo -e "\033[1m:::::> ERROR: $@\033[0m"; CLEAN_UP; exit 1; }
 CLEAN_UP()
 {
   echo -e "\033[1m:::::> Cleaning up\033[0m";
-  umount "$oldMount" "$newMount" 2>/dev/null
+  umount "$oldMount" "$newMount"
+  #umount -l "$oldImage" "$newImage" 
+  #umount "$oldImage" "$newImage" 
   losetup -d "$virtPart"
+  losetup -D
   rm "$newImage"
 }
 
@@ -31,7 +36,9 @@ CLEAN_UP()
 
 # Sanity check
 if [ ! -f "$1" -o -f "$2" ]; then
+  [ -f "$2" ] && echo "WARNING: $2 file exists"
   echo "USAGE: $(basename $0) [dd image] [new image]";
+  echo "USAGE: $(basename $0) [dd image] [new image] [new size in MB]";
   exit 1;
 fi
 
@@ -42,11 +49,21 @@ volume=$(file "$oldImage" | awk -F ", " '{print $3}' | grep '^volume name "' | a
 mkdir -p "$oldMount" &&
 mount "$oldImage" "$oldMount" &&
 usedspace=$(df 2>&1 | grep "$oldMount"$ | awk NR==1 | awk -v buffer=$buffer '{print $3+buffer}') &&
-umount "$oldMount";
+umount "$oldMount" || EXIT_STATUS "unable to unmount $oldMount"
 if [ "$usedspace" -gt "0" ]; then
   imgSize=$((usedspace+buffer));
+  echo -e "\033[1m:::::> Notice: new image size set to $imgSize\033[0m"; 
 else
   echo -e "\033[1m:::::> Warning: unable to detect used space\033[0m";
+fi
+
+# Override new image size
+if [ ! -z "$minSize" ]; then
+  minSize=$((minSize*1000));
+  if [ "$minSize" -gt "$imgSize" ]; then
+    imgSize="$minSize"
+    echo -e "\033[1m:::::> Override: new image size set to $imgSize\033[0m"; 
+  fi
 fi
 
 # Create new iamge
@@ -56,20 +73,22 @@ chmod 777 "$newImage"
 
 # Mount image as block device
 losetup -f "$newImage" || EXIT_STATUS "Unable to mount virtDrive"
-virtPart=$(losetup -a 2>&1 | grep "$newImage" | awk -F ":" '{print $1}');
+virtPart=$(losetup -a 2>&1 | grep -v "deleted" | grep "$newImage" | awk -F ":" '{print $1}');
+echo -e "\033[1m:::::> Using loopback device $virtPart \033[0m";
 
 # Create filesystem
 [ -b "$virtPart" ] || EXIT_STATUS "Failed to create partition"
 virtFS=$(fsck -N "$virtPart" 2>&1 | awk -F " fsck." '{print $2}' | awk '{print $1}' | grep -v ^$);
 if [ "$virtFS" != "ext4" ]; then
   echo -e "\033[1m:::::> Creating filesystem\033[0m";
-  mkfs.ext4 -m 0 -L "$label" "$virtPart" || EXIT_STATUS "Failed to create EXT4 partition"
+  mkfs.ext4 -T small -m 0 -O ^has_journal,extent -L "$label" "$virtPart" || EXIT_STATUS "Failed to create EXT4 partition"
   virtFS=$(fsck -N "$virtPart" 2>&1 | awk -F " fsck." '{print $2}' | awk '{print $1}' | grep -v ^$);
 fi
 
 # Unmount block device
 [ "$virtFS" = "ext4" ] || EXIT_STATUS "Filesystem check failed. Not ext4"
 losetup -d "$virtPart"
+losetup -D
 
 # Copy files to new image
 echo -e "\033[1m:::::> Mounting images\033[0m";
@@ -80,6 +99,10 @@ echo -e "\033[1m:::::> Copying files (this may take awhile)\033[0m" &&
 tar -C "$oldMount" -cpf - . | tar -C "$newMount" -xf -
 
 echo -e "\033[1m:::::> Unmounting images\033[0m";
-umount "$oldImage" "$newImage"
+sync
+
+umount "$oldMount" "$newMount"
+#umount -l "$oldImage" "$newImage"
+#umount "$oldImage" "$newImage"
 echo -e "\033[1m:::::> [DONE]\033[0m"
 ### END ###

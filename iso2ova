@@ -1,7 +1,7 @@
 #!/bin/bash
 ####################
 ### iso2ova ########
-version="0.1" ######
+version="0.3" ######
 ### JustBrowsing ###
 ####################
 
@@ -33,6 +33,8 @@ CREATE_VM()
   VBoxManage storageattach "$vmName" --storagectl "IDE Controller" --port 0 --device 0 --type hdd --medium "$fileVDI";
   echo "VM sound: PulseAudio/AC97"  ;
   VBoxManage modifyvm "$vmName" --audio pulse --audiocontroller ac97;
+  echo "VM usb: enabled"  ;
+  VBoxManage modifyvm "$vmName" --usb on;
 }
 
 EXPORT_OVA()
@@ -52,11 +54,12 @@ DELETE_VM()
 DELETE_VM 2>/dev/null;
 echo "==> Converting ISO to VDI" &&
 CONVERT_HDD &&
-echo "==> Creating VM: $vmMemory MB, NAT networking, PulseAudio/AC97" &&
+echo "==> Creating VM: $vmMemory MB, NAT networking, PulseAudio/AC97, USB 1.1" &&
 CREATE_VM &&
 echo "==> Exporting to OVA container" &&
 EXPORT_OVA &&
 echo "==> Successfully built: $fileOVA" &&
 DELETE_VM;
+chmod 777 "$fileOVA"
 
 ### END ###

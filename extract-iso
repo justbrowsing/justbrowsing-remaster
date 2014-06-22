@@ -1,7 +1,7 @@
 #!/bin/bash
 ####################
 ### extract-iso ####
-version="0.3" ######
+version="0.5" ######
 ### JustBrowsing ###
 ####################
 
@@ -14,7 +14,7 @@ exit_status() { echo "ERROR: $@"; exit 1; }
 
 
 # Check depends
-checkISO=$(file "$isoFile" | awk -F ":" '{print $2}' | grep -o -e "ISO 9660" -e "x86 boot sector");
+checkISO=$(file -F "|" "$isoFile" | awk -F "|" '{print $2}' | grep -o -e "ISO 9660" -e "x86 boot sector" -e "DOS/MBR boot");
 ifSquash=$(which mksquashfs 2>/dev/null);
 ifImage=$(which squash-image 2>/dev/null);
 ifSfs=$(which sfs2iso 2>/dev/null);
@@ -51,14 +51,14 @@ echo "==> Mounted $isoFile : $mntDir" &&
 mkdir -p "${buildDir}/syslinux/arch/any" &&
 cp -r "${mntDir}/[BOOT]" "${mntDir}/EFI" "${mntDir}/isolinux" "${mntDir}/loader" "${buildDir}/syslinux/" &&
 cp "${mntDir}/arch"/{aitab,checksum.i686.md5,pkglist.i686.txt} "${buildDir}/syslinux/arch/" &&
-mkdir -p "${buildDir}/syslinux/arch/boot"/{i686,x86_64} &&
-cp -r "${mntDir}/arch/boot"/{memtest,memtest.COPYING,syslinux} "${buildDir}/syslinux/arch/boot/" &&
+mkdir -p "${buildDir}/syslinux/arch/boot/any" &&
+cp -r "${mntDir}/arch/boot"/syslinux "${buildDir}/syslinux/arch/boot/" &&
 rm "${buildDir}/syslinux/arch/boot/syslinux/splash.png" &&
 
 if [ -f "splash.png" ]; then
-  cp splash.png "${buildDir}/syslinux/arch/boot/syslinux/splash.png" || exit_status "cp failed"
+  cp splash.png "${buildDir}/syslinux/arch/boot/syslinux/splash.png" || exit_status "splash failed"
 else
-  wget --quiet "https://raw.github.com/justbrowsing/justbrowsing-remaster/master/splash.png" -O "${buildDir}/syslinux/arch/boot/syslinux/splash.png" || exit_status "wget failed"
+  cp ${buildDir}/syslinux/arch/boot/syslinux/{edition-c,splash}.png || exit_status "cp failed"
 fi
 
 # Unsquash image
@@ -74,8 +74,8 @@ umount "$mntDir" &&
 mount "${tmpDir}/squashfs-root/root-image.fs" "$mntDir" &&
 echo "+++++++++++++++++++++++++++++++++";
 echo "==> Mounted at: ${mntDir}";
-echo "==> Firefox profile: ${mntDir}/home/user/.mozilla/firefox/oknp3n8p.default-backup";
-echo "==> Chrome profile: ${mntDir}/home/user/.config/google-chrome-backup";
+echo "==> Firefox profile: ${mntDir}/home/user/.mozilla/firefox/firefox.jb";
+echo "==> Chrome profile: ${mntDir}/home/user/.config/google-chrome.jb";
 echo "+++++++++++++++++++++++++++++++++";
 
 # Remaster ISO

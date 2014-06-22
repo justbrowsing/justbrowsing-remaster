@@ -1,67 +1,79 @@
 #!/bin/bash
 ####################
 ### sfs2iso ########
-version="0.4" ######
+version="0.6" ######
 ### JustBrowsing ###
 ####################
 
-distro="justbrowsing";
+distroName="JustBrowsing"
 timestamp=$(date +%Y%m%d);
 squashDir=$(readlink -e "$1");
 buildDir=$(readlink -e "$2");
+
+configEntry="${buildDir}/arch/flavor.jb"
+[ -f "${buildDir}/arch/pkglist.x86_64.txt" ] && distroName="JustBrowsing64"
+[ -f "$configEntry" ] && distroName=$(grep -o "distroName\S*" "$configEntry" | sed 's/^distroName=//')
+distro=$(echo "$distroName" | tr -cd '[:alnum:]\n' | tr 'A-Z' 'a-z');
+
 [ "$3" = "--nightly" ] && timestamp="${timestamp}_nightly";
 [ "$3" = "--devedition" ] && timestamp="${timestamp}_dev";
-[ "$3" = "--tweak" ] && timestamp="${timestamp}_$(date +%T)";
+[ "$3" = "--tweak" ] && timestamp="${timestamp}_$(date +%H%M%S)";
 output="${distro}_${timestamp}.iso"
 
-exit_status()
+EXIT_STATUS()
 {
   echo "==> ERROR: $@";
   exit 1;
 }
 
+
 # Sanity check
 if [ ! -d "$1" -o ! -d "$2" ]; then
-  echo "USAGE: $(basename $0) [squash directory] [syslinux directory]";
+  echo "USAGE: $(basename $0) [squash dir] [syslinux dir]";
+  echo "USAGE: $(basename $0) [squash dir] [syslinux dir] [--nightly|--devedition|--tweak]";
   exit 1;
 fi
 
-
 # Copy squashfs
-[ -f "$squashDir/root-image.fs.sfs" ] || exit_status "File root-image.fs.sfs does not exist"
+[ -f "$squashDir/root-image.fs.sfs" ] || EXIT_STATUS "File root-image.fs.sfs does not exist"
 [ -f "$buildDir/arch/any/root-image.fs.sfs" ] && rm "$buildDir/arch/any/root-image.fs.sfs" 2>/dev/null
-ln "$squashDir/root-image.fs.sfs" "$buildDir/arch/any/root-image.fs.sfs" || exit_status "Non-empty destination: $buildDir/arch/any/"
+ln "$squashDir/root-image.fs.sfs" "$buildDir/arch/any/root-image.fs.sfs" || EXIT_STATUS "Non-empty destination: $buildDir/arch/any/"
+
+# Add checksum
+machine="i686"
+[ -f "${buildDir}/arch/pkglist.x86_64.txt" ] && machine="x86_64"
+cd "$buildDir/arch"
+echo ":: Create ${distroName} ${machine} checksum"
+md5sum aitab any/root-image.fs.sfs > checksum.${machine}.md5
+cp "$squashDir/pkglist.${machine}.txt" pkglist.${machine}.txt
+cd - >/dev/null
 
 # Kernel and initrd
-[ -f "$squashDir/vmlinuz-linux" ] || exit_status "File vmlinuz-linux does not exist"
-cp "$squashDir"/vmlinuz-linux "$buildDir"/arch/boot/i686/vmlinuz || exit_status "Cannot copy i686 kernel"
-[ -f "$squashDir/initramfs-linux.img" ] || exit_status "File initramfs-linux.img does not exist"
-if [ ! -f "${buildDir}/arch/boot/i686/archiso.img" ]; then
+echo ":: Copy kernel and initrd to ISO"
+[ -f "$squashDir/vmlinuz-linux" ] || EXIT_STATUS "File vmlinuz-linux does not exist"
+cp "$squashDir/vmlinuz-linux" "${buildDir}/arch/boot/${machine}/vmlinuz" || EXIT_STATUS "Cannot copy ${machine} kernel"
+[ -f "$squashDir/initramfs-linux.img" ] || EXIT_STATUS "File initramfs-linux.img does not exist"
+if [ ! -f "${buildDir}/arch/boot/${machine}/archiso.img" ]; then
   if [ -f "${squashDir}/initramfs-linux.img" ]; then
-    cp "${squashDir}/initramfs-linux.img" "$buildDir"/arch/boot/i686/archiso.img || exit_status "Cannot copy i686 initrd"
-    cp "${squashDir}/initramfs-linux-fallback.img" "$buildDir"/arch/boot/i686/archiso-fallback.img;
+    cp "${squashDir}/initramfs-linux.img" "${buildDir}/arch/boot/${machine}/archiso.img" || EXIT_STATUS "Cannot copy ${machine} initrd"
   else
-    cp "$squashDir"/archiso.img "$buildDir"/arch/boot/i686/archiso.img || exit_status "Cannot copy i686 initrd"
-    cp "$squashDir"/archiso-fallback.img "$buildDir"/arch/boot/i686/archiso-fallback.img;
+    cp "$squashDir/archiso.img" "${buildDir}/arch/boot/${machine}/archiso.img" || EXIT_STATUS "Cannot copy ${machine} initrd"
   fi
 fi
 
+# Add timestamp
+sed -i "s/^JustBrowsing.*/${distroName} $timestamp/g" ${buildDir}/arch/boot/syslinux/archiso_*.cfg
+sed -i "s/^${distroName}.*/${distroName} $timestamp/g" ${buildDir}/arch/boot/syslinux/archiso_*.cfg
+
 # Build ISO
 cd "$buildDir"
-
-# Add timestamp
-sed -i "s/^JustBrowsing.*/JustBrowsing $timestamp/g" arch/boot/syslinux/archiso_firefox.cfg
-sed -i "s/^JustBrowsing.*/JustBrowsing $timestamp/g" arch/boot/syslinux/archiso_chrome.cfg
-sed -i "s/^JustBrowsing.*/JustBrowsing $timestamp/g" arch/boot/syslinux/archiso_vbox.cfg
-sed -i "s/^JustBrowsing.*/JustBrowsing $timestamp/g" arch/boot/syslinux/archiso_vmware.cfg
-
-[ -f "isolinux/isolinux.bin" -a -f "isolinux/boot.cat" ] || exit_status "Wrong directory";
+[ -f "isolinux/isolinux.bin" -a -f "isolinux/boot.cat" ] || EXIT_STATUS "Wrong directory";
 genisoimage -l -r -J -V "$distro" -b isolinux/isolinux.bin -no-emul-boot -boot-load-size 4 -boot-info-table \
-	-c isolinux/boot.cat -o ../"$output" . || exit_status "genisoimage failed";
+	-c isolinux/boot.cat -o ../"$output" . || EXIT_STATUS "genisoimage failed";
 parentDir=$(dirname "$buildDir");
 
 # Hybrid-ize ISO (allows USB boot)
-isohybrid ../"$output" || exit_status "isohybrid failed"
+isohybrid ../"$output" || EXIT_STATUS "isohybrid failed"
 
 # Cleanup
 rm "$buildDir"/arch/any/root-image.fs.sfs 

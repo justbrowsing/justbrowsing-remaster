@@ -1,7 +1,7 @@
 #!/bin/bash
 ####################
 ### frs-upload #####
-version="0.2" ######
+version="0.5" ######
 ### JustBrowsing ###
 ####################
 
@@ -12,6 +12,11 @@ userName="justbrowsing"
 projName="justbrowsing"
 alphaOne="j"
 alphaTwo="ju"
+
+testing="false"
+dev="false"
+nightly="false"
+stable="false"
 
 UPLOAD_OVA()
 {
@@ -30,7 +35,7 @@ UPLOAD_OVA()
 }
 
 UPLOAD_ISO()
-{  
+{
   isoFile="${buildDir}/${projName}_${release}${1}.iso"
   echo "==> Uploading $isoFile"
   if [ -f "$isoFile" ]; then
@@ -56,6 +61,28 @@ UPLOAD_README()
     fi
 }
 
+UPLOAD_CHANGELOG()
+{
+    if [ "$isoStatus" = "0" ]; then
+      sleep 60;
+      echo "==> rsync -avP -e ssh $buildDir/pkglist.i686.txt ${userName}@frs.sourceforge.net:/home/frs/project/${alphaOne}/${alphaTwo}/${folderDir}/"
+      rsync -avP -e ssh "$buildDir/pkglist.i686.txt" ${userName}@frs.sourceforge.net:/home/frs/project/${alphaOne}/${alphaTwo}/${folderDir}/;
+    else
+      echo "==> ISO Upload failed";
+    fi
+}
+
+
+# Input parameters
+[[ $@ = *testing* ]] && testing="true"
+[[ $@ = *dev* ]] && dev="true"
+[[ $@ = *nightly* ]] && nightly="true"
+[[ $@ = *stable* ]] && stable="true"
+echo "Build $release:";
+echo "testing: $testing";
+echo "dev: $dev";
+echo "nightly: $nightly";
+echo "stable: $stable";
 
 # Sanity check
 if [[ "$release" != [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9] ]]; then
@@ -63,15 +90,16 @@ if [[ "$release" != [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9] ]]; then
   exit 1;
 fi
 
-# Upload OVA images
-[[ $@ = *dev* ]] && folderDir="${projName}/Virtual" && UPLOAD_OVA "_dev"
-[[ $@ = *nightly* ]] && folderDir="${projName}/Virtual" && UPLOAD_OVA "_nightly"
-[[ $@ = *stable* ]] && folderDir="${projName}/Virtual" && UPLOAD_OVA
-
 # Upload ISO images
-[[ $@ = *dev* ]] && folderDir="${projName}/DevEdition" && UPLOAD_ISO "_dev"
-[[ $@ = *nightly* ]] && folderDir="${projName}/Nightlies" && UPLOAD_ISO "_nightly"
-[[ $@ = *stable* ]] && folderDir="${projName}" && UPLOAD_ISO
+[ "$testing" = "true" ] && folderDir="${projName}/Testing" && UPLOAD_ISO "_testing"
+[ "$dev" = "true" ] && folderDir="${projName}/DevEdition" && UPLOAD_ISO "_dev"
+[ "$nightly" = "true" ] && folderDir="${projName}/Nightlies" && UPLOAD_ISO "_nightly" && UPLOAD_CHANGELOG
+[ "$stable" = "true" ] && folderDir="${projName}" && UPLOAD_ISO && UPLOAD_CHANGELOG
 
+# Upload OVA images
+[ "$dev" = "true" ] && folderDir="${projName}/Virtual" && UPLOAD_OVA "_dev"
+[ "$nightly" = "true" ] && folderDir="${projName}/Virtual" && UPLOAD_OVA "_nightly"
+[ "$stable" = "true" ]  && folderDir="${projName}/Virtual" && UPLOAD_OVA
 
+echo "[DONE]"
 ### END ###

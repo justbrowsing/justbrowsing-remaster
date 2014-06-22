@@ -1,7 +1,7 @@
 #!/bin/bash
 ####################
 ### squash-image ###
-version="0.3" ######
+version="0.4" ######
 ### JustBrowsing ###
 ####################
 
@@ -55,10 +55,6 @@ echo "==> Deleting user histories"
 rm ${mountpoint}/root/.bash_history 2>/dev/null;
 rm ${mountpoint}/home/*/.bash_history 2>/dev/null;
 
-# Disable Virtual Terminals
-echo "==> Disabling VTs"
-cp ${mountpoint}/opt/justbrowsing/10-disableVTs.conf ${mountpoint}/etc/X11/xorg.conf.d/ 2>/dev/null;
-
 # Clean packages
 echo "==> Cleaning package caches"
 rm ${mountpoint}/var/cache/packer/* 2>/dev/null;
@@ -71,12 +67,24 @@ rm ${mountpoint}/var/log/restoreboot.log 2>/dev/null;
 rm -r ${mountpoint}/var/log/journal/ 2>/dev/null;
 rm -r ${mountpoint}/var/log/old/ 2>/dev/null;
 
-# Clean firefox
+# Clean browser profiles
+rm -rf ${mountpoint}/home/*/.macromedia
 rm -rf ${mountpoint}/home/*/.mozilla/firefox/*/bookmarkbackups
 rm -rf ${mountpoint}/home/*/.mozilla/firefox/*/safebrowsing-backup
 rm -f ${mountpoint}/home/*/.mozilla/firefox/*/adblock*/patterns-backup*ini
 rm -f ${mountpoint}/home/*/.mozilla/firefox/*/sessionstore.js
+find ${mountpoint}/home/*/.mozilla/firefox/firefox.jb -name "*bak" -exec rm {} \;
+find ${mountpoint}/home/*/.mozilla/firefox/firefox.jb -name "*old*" -exec rm {} \;
+rm -rf ${mountpoint}/home/*/.config/google-chrome.jb/pnacl/
+rm -rf ${mountpoint}/home/*/.config/google-chrome.jb/PnaclTranslationCache/
+rm -rf ${mountpoint}/home/*/.config/google-chrome.jb/Safe\ Browsing\ *
+find ${mountpoint}/home/*/.config/google-chrome.jb -name "*bak" -exec rm {} \;
+find ${mountpoint}/home/*/.config/google-chrome.jb -name "*old*" -exec rm {} \;
 
+# Clean boot directory
+rm ${mountpoint}/boot/vmlinuz*
+rm ${mountpoint}/boot/initramfs*.img
+rm ${mountpoint}/boot/archiso*.img
 
 # Allow squashfs boot
 echo "==> Removing fstab and mtab"
@@ -92,6 +100,7 @@ if [ "$noAsk" != "true" ]; then
 fi
 sync; sleep 1; sync; sleep 1; sync;
 umount $mountpoint/* $mountpoint 2>&1 | grep -v "not mounted"
+umount -l $mountpoint/* $mountpoint 2>&1 | grep -v "not mounted"
 checkEmpty=$(ls "$mountpoint" 2>/dev/null | wc -l);
 [ "$checkEmpty" = "0" ] || exit_status "Unable to unmount the image"
 

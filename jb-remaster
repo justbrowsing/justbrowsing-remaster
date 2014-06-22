@@ -1,0 +1,128 @@
+#!/bin/bash
+###################
+### jb-remaster ###
+version="0.1" #####
+### JustBrowsing ##
+###################
+
+isoFile=$(readlink -e "$@" 2>/dev/null);
+mntDir="/opt/remaster-iso"
+tmpDir="/opt/remaster-tmp"
+buildDir="/opt/remaster-build"
+imgFile="${tmpDir}/remaster.img"
+imgSize="3000" #MB
+sectorStart="2048"
+sectorEnd="307200"
+#partSize="730" #MB
+#sectorMax="2437119"
+#sectorEnd=$((sectorMax-sectorStart-partSize*2048))
+
+
+EXIT_STATUS() { echo "ERROR: $@"; CLEAN_UP; exit 1; }
+
+CLEAN_UP() 
+{
+  echo "==> Cleanup";
+  umount "$mntDir/*/*" 2>/dev/null;
+  umount "$mntDir/*" 2>/dev/null;
+  umount "$mntDir" 2>/dev/null;
+}
+
+SENDKEY_FDISK() {
+  for cmd in $@; do
+    if [ "$cmd" = "ENTER" ]; then
+      echo -ne "\n"
+    else
+      echo -ne "${cmd}\n"
+    fi
+  done
+}
+
+# Check depends
+checkISO=$(file "$isoFile" | awk -F ":" '{print $2}' | grep -o -e "ISO 9660" -e "x86 boot sector" -e "DOS/MBR boot");
+isoVersion=$(echo "$isoFile" | awk -F "/" '{print $NF}');
+[ ! -z "$isoFile" ] || EXIT_STATUS "USAGE: $0 [ISO file]"
+[ -f "$isoFile" ] || EXIT_STATUS "file $isoFile does not exist"
+[ ! -z "$checkISO" ] || EXIT_STATUS "$isoFile not a valid ISO file"
+[ ! -z "$checkISO" ] && echo "==> Hybrid-ized ISO detected"
+
+ifQEMU64=$(which qemu-system-x86_64 2>/dev/null);
+ifQEMU32=$(which qemu-system-i386 2>/dev/null);
+arch=$(uname -m);
+if [ ! -z "$ifQEMU64" -a "$arch" = "x86_64" ]; then
+  QEMU="qemu-system-x86_64";
+elif [ ! -z "$ifQEMU32" -a "$arch" = "i686" ]; then
+  QEMU="qemu-system-i386";
+else
+  EXIT_STATUS "$arch: unsupported architecture";
+fi
+
+# Setup
+[ "$UID" = "0" ] || EXIT_STATUS "Need to be root"
+rm -rf "$mntDir" "$tmpDir" "$buildDir" 2>/dev/null || EXIT_STATUS "unable to remove directories"
+mkdir -p "$mntDir" "$tmpDir" "$buildDir" || EXIT_STAUTS "unable to create directories"
+
+# Unpack image
+mount -o loop -t iso9660 "$isoFile" "$mntDir" &&
+echo "==> Mounted $isoFile : $mntDir"
+mkdir -p "${tmpDir}/syslinux/arch/any" &&
+cp -r "${mntDir}/[BOOT]" "${mntDir}/EFI" "${mntDir}/isolinux" "${mntDir}/loader" "${tmpDir}/syslinux/" &&
+cp "${mntDir}/arch"/{aitab,checksum.i686.md5,pkglist.i686.txt} "${tmpDir}/syslinux/arch/" &&
+mkdir -p "${tmpDir}/syslinux/arch/boot"/{i686,x86_64} &&
+cp -r "${mntDir}/arch/boot/syslinux" "${tmpDir}/syslinux/arch/boot/"
+
+# Unsquash image
+[ -f "${mntDir}/arch/any/root-image.fs.sfs" ] || EXIT_STATUS "squashed filesystem not found"
+cd "$tmpDir" &&
+unsquashfs "${mntDir}/arch/any/root-image.fs.sfs" &&
+echo "==> Unsquashed to $tmpDir" &&
+cd - > /dev/null &&
+cp "${mntDir}/arch/boot/i686/vmlinuz" "${tmpDir}/vmlinuz-linux" &&
+cp "${mntDir}/arch/boot/i686/archiso.img" "${tmpDir}/initramfs-linux.img" &&
+umount "$mntDir"
+
+# Create virtual HDD
+#qemu-img create -f qcow2 "$imgFile" "${imgSize}M" &&
+echo "==> Created $imgFile (${imgSize}MB)" &&
+dd if=/dev/zero of="$imgFile" bs=1MB count="$imgSize" &&
+chmod 777 "$imgFile"
+parted -s -a optimal "$imgFile"
+parted -s "$imgFile" mklabel msdos
+
+# Create new partitions
+echo "==> Create 1st partition"
+SENDKEY_FDISK "n p 1 ${sectorStart} ${sectorEnd} t ef w" | fdisk "$imgFile"
+echo "==> Create 2nd partition"
+SENDKEY_FDISK "n p 2 ENTER ENTER a 2 p w" | fdisk "$imgFile"
+
+# Create device maps
+echo "==> Create device maps"
+kpartx -v -s -a "$imgFile"
+partDATA=$(kpartx -l "$imgFile" | awk '{print $1}' | awk NR==1 | sed 's|^|/dev/mapper/|');
+partJB=$(kpartx -l "$imgFile" | awk '{print $1}' | awk NR==2 | sed 's|^|/dev/mapper/|');
+[ -b "$partDATA" ] || EXIT_STATUS "unable to find ${partDATA} partition"
+[ -b "$partJB" ] || EXIT_STATUS "unable to find ${partJB} partition"
+
+# Format filesystems
+echo "==> Formatting FAT32 partition"
+mkfs.vfat -n "JUSTDATA" "$partDATA"
+echo "==> Formatting EXT4 partition"
+mkfs.ext4 -L "justbrowsing" "$partJB"
+
+# Mount filesystems
+mount "${tmpDir}/squashfs-root/root-image.fs" "$mntDir" || EXIT_STATUS "unable to mount root-image.fs to ${mntDir}"
+mount "$partJB" "$buildDir" || EXIT_STATUS "unable to mount ${partJB} to ${buildDir}"
+
+# Clone
+echo "==> Unpacking filesystem"
+tar -C "$mntDir" -cpf - . | tar -C "$buildDir" -xf -
+touch "${buildDir}/${isoVersion}.release"
+sync
+umount "$mntDir" 
+#umount "$buildDir"
+#kpartx -d /dev/loop0
+
+# Cleanup
+CLEAN_UP
+
+### END ###

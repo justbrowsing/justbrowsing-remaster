@@ -1,0 +1,45 @@
+#!/bin/bash
+buildDir="/opt/jb-build"
+isoMnt="/jb-compare/iso"
+sfsMnt="/jb-compare/squash"
+fsMnt="/jb-compare/ext4"
+
+EXIT_STATUS() { echo "ERROR: $@"; EXIT_MATRIX; exit 1; }
+
+ENTER_MATRIX() 
+{ 
+  mount -o loop,ro "$isoFile" "$isoMnt" || 
+    EXIT_STATUS "Unable to mount ISO";
+  mount -o ro -t squashfs "${isoMnt}/arch/any/root-image.fs.sfs" "$sfsMnt"  || 
+    EXIT_STATUS "Unable to mount squashfs";
+  mount -o ro -t ext4 "${sfsMnt}/root-image.fs" "$fsMnt" || 
+    EXIT_STATUS "Unable to mount ext4 filesystem";
+}
+
+EXIT_MATRIX() { 
+  umount "$fsMnt"
+  umount "$sfsMnt"
+  umount "$isoMnt"
+}
+
+
+### Parse input ###
+[[ "$1" = ???????[0-9] ]] && input="$1"
+[ -f "${buildDir}/justbrowsing_${input}_nightly.iso" ] && 
+  isoFile="${buildDir}/justbrowsing_${input}_nightly.iso"
+[ -f "${buildDir}/justbrowsing_${input}.iso" ] && 
+  isoFile="${buildDir}/justbrowsing_${input}.iso"
+[ -f "$1" ] && isoFile=$(readlink -e "$1");
+[ -f "$isoFile" ] || EXIT_STATUS "ISO not found"
+
+[ "$UID" = "0" ] || EXIT_STATUS "Need to be root"
+mkdir -p "$isoMnt" "$sfsMnt" "$fsMnt"
+[ -d "$isoMnt" -a "$sfsMnt" -a "$fsMnt" ] || EXIT_STATUS "Mount directories missing"
+
+ENTER_MATRIX
+echo "==> Mounted to $fsMnt"
+echo "==> Entering chroot (type 'exit' to close)"
+arch-chroot "$fsMnt" /bin/bash
+EXIT_MATRIX
+
+### END ###
