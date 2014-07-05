@@ -1,22 +1,30 @@
 #!/bin/bash
 ####################
 ### iso2ova ########
-version="0.3" ######
+version="0.4" ######
 ### JustBrowsing ###
 ####################
 
 isoPath=$(readlink -e "$1");
 vmName="JustBrowsing";
 vmMemory="2048";
+vmGPU="64";
 fileVDI=$(echo "$isoPath" | sed -e 's/\.iso$/\.vdi/' -e 's/\.ISO$/\.vdi/');
 fileOVA=$(echo "$isoPath" | sed -e 's/\.iso$/\.ova/' -e 's/\.ISO$/\.ova/');
-
+usbIMG=$(dirname "$isoPath" | sed 's/$/\/JUSTDATA.img/');
+usbVHD=$(echo "$usbIMG" | sed 's/\.img$/\.vhd/');
 
 EXIT_STATUS() { echo "ERROR: $@"; exit 1; }
+PRINT_HEADER() { echo -e "\e[1;34m==> \e[0;32m$@\e[0m"; }
 
 CONVERT_HDD()
 {
-  VBoxManage convertfromraw -format VDI "$isoPath" "$fileVDI";
+  VBoxManage convertfromraw --format VDI "$isoPath" "$fileVDI";
+}
+
+CONVERT_USB()
+{
+  VBoxManage convertfromraw --format VHD "$usbIMG" "$usbVHD";
 }
 
 CREATE_VM()
@@ -25,15 +33,19 @@ CREATE_VM()
   VBoxManage createvm --name "$vmName" --ostype ArchLinux --register;
   echo "VM memory: $vmMemory";
   VBoxManage modifyvm "$vmName" --memory "$vmMemory" --acpi on;
+  echo "VM GPU memory: $vmGPU";
+  VBoxManage modifyvm "$vmName" --vram "$vmGPU";
   echo "VM networking: NAT";
   VBoxManage modifyvm "$vmName" --nic1 nat --bridgeadapter1 eth0;
   echo "VM storage: IDE";
   VBoxManage storagectl "$vmName" --name "IDE Controller" --add ide;
   echo "VM disk: $(basename "$fileVDI")";
   VBoxManage storageattach "$vmName" --storagectl "IDE Controller" --port 0 --device 0 --type hdd --medium "$fileVDI";
-  echo "VM sound: PulseAudio/AC97"  ;
+  [ -f "$usbVHD" ] && echo "VM USB: $(basename "$usbVHD")" &&
+  VBoxManage storageattach "$vmName" --storagectl "IDE Controller" --port 1 --device 1 --type hdd --medium "$usbVHD";
+  echo "VM sound: PulseAudio/AC97";
   VBoxManage modifyvm "$vmName" --audio pulse --audiocontroller ac97;
-  echo "VM usb: enabled"  ;
+  echo "VM usb: enabled";
   VBoxManage modifyvm "$vmName" --usb on;
 }
 
@@ -46,19 +58,21 @@ DELETE_VM()
 {
   VBoxManage unregistervm "$vmName" --delete;
   rm "$fileVDI" 2>/dev/null;
+  rm "$usbVHD" 2>/dev/null;
 }
 
 
 [ -f "$isoPath" ] && [[ "$isoPath" = *.[iI][Ss][Oo] ]] || EXIT_STATUS "$(basename $0) [ISO file]"
 [ -f "$fileOVA" ] && rm "$fileOVA"
 DELETE_VM 2>/dev/null;
-echo "==> Converting ISO to VDI" &&
-CONVERT_HDD &&
-echo "==> Creating VM: $vmMemory MB, NAT networking, PulseAudio/AC97, USB 1.1" &&
-CREATE_VM &&
-echo "==> Exporting to OVA container" &&
-EXPORT_OVA &&
-echo "==> Successfully built: $fileOVA" &&
+PRINT_HEADER "Converting ISO to VDI"
+CONVERT_HDD || EXIT_STATUS "Cannot convert to HDD"
+[ -f "$usbIMG" ] && PRINT_HEADER "Converting USB to VDI" && CONVERT_USB
+PRINT_HEADER "Creating VM: $vmMemory MB, NAT networking, PulseAudio/AC97, USB 1.1"
+CREATE_VM || EXIT_STATUS "Cannot create VM"
+PRINT_HEADER "Exporting to OVA container"
+EXPORT_OVA || EXIT_STATUS "Cannot create OVA"
+PRINT_HEADER "Successfully built: $fileOVA"
 DELETE_VM;
 chmod 777 "$fileOVA"
 

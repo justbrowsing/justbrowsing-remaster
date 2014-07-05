@@ -51,6 +51,14 @@ if [ "$1" = "--upload" ]; then
   isoFile=$(readlink -e "$@" 2>/dev/null);
 fi
 
+# Check build OVA
+if [ "$1" = "--disableova" ]; then
+  echo -e "\033[1m:::::> Build OVA disabled\033[0m";
+  shift;
+  enableOVA="false";
+  isoFile=$(readlink -e "$@" 2>/dev/null);
+fi
+
 # Check force
 if [ "$1" = "--force" ]; then
   echo -e "\033[1m:::::> Force flag enabled\033[0m";
@@ -235,6 +243,7 @@ fi
 # Upgrade packages
 chroot "$mntDir" mkdir -p /var/cache/{apacman,pacman}/pkg
 chroot "$mntDir" pacman -Syu --noconfirm
+chroot "$mntDir" pacman -R gutenprint --noconfirm
 chroot "$mntDir" pacman -S linux-headers xorg-server-devel perl --needed --noconfirm
 chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null;
 
@@ -320,12 +329,22 @@ fi
 
 # Remove crud
 chroot "$mntDir" pacman -Rss apacman-deps --noconfirm
-chroot "$mntDir" pacman -S diffutils --needed --noconfirm
+chroot "$mntDir" pacman -S diffutils gutenprint --needed --noconfirm
 chroot "$mntDir" pacman -R linux-headers xorg-server-devel perl db --noconfirm
 chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null;
 umount "${mntDir}/var/cache"
 chroot "$mntDir" /opt/justbrowsing/cleanup2 2>/dev/null;
+chroot "$mntDir" /opt/justbrowsing/compress-bins 2>/dev/null;
+chroot "$mntDir" pacman -Rss guile --noconfirm
 chroot "$mntDir" df -h 2>/dev/null | grep /$;
+
+# Enter choot last time
+read -t 5 -n 1 -p "==> Enter chroot (y/N): " input
+echo "";
+[ "$interactive" = "true" ] && input="Y"
+if [[ "$input" = [Yy] ]]; then
+  chroot "$mntDir" /bin/bash;
+fi
 
 # Update changelog
 changeLog="${mntDir}/root/README.md";
@@ -341,8 +360,10 @@ date +"+   "%Y%m%d_nightly >> "$changeLog"
 cat "${mntDir}/root/pkgs.log" >> "$changeLog"
 echo -e "$nightlyTail" >> "$changeLog"
 cp "$changeLog" "$buildDir"
-chroot "$mntDir" pacman -Q > "${tmpDir}/pkglist.${machine}.txt"
-cp "${tmpDir}/pkglist.${machine}.txt" "${builDir}/pkglist.${machine}.txt"
+if [ "$flag" = "--stable" -o "$flag" = "--nightly" ]; then
+  chroot "$mntDir" pacman -Q |tee /tmp/pkglist.${machine}.txt
+  cp "${mntDir}/tmp/pkglist.${machine}.txt" "${builDir}/pkglist.${machine}.txt"
+fi
 
 # Cleanup /boot
 rm "${mntDir}/boot/vmlinuz-linux" 2>/dev/null;

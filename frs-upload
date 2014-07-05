@@ -97,6 +97,7 @@ fi
 [ "$stable" = "true" ] && folderDir="${projName}" && UPLOAD_ISO && UPLOAD_CHANGELOG
 
 # Upload OVA images
+[ "$testing" = "true" ] && folderDir="${projName}/Virtual" && UPLOAD_OVA "_testing"
 [ "$dev" = "true" ] && folderDir="${projName}/Virtual" && UPLOAD_OVA "_dev"
 [ "$nightly" = "true" ] && folderDir="${projName}/Virtual" && UPLOAD_OVA "_nightly"
 [ "$stable" = "true" ]  && folderDir="${projName}/Virtual" && UPLOAD_OVA

@@ -68,6 +68,7 @@ rm -r ${mountpoint}/var/log/journal/ 2>/dev/null;
 rm -r ${mountpoint}/var/log/old/ 2>/dev/null;
 
 # Clean browser profiles
+rm -rf ${mountpoint}/home/*/.adobe
 rm -rf ${mountpoint}/home/*/.macromedia
 rm -rf ${mountpoint}/home/*/.mozilla/firefox/*/bookmarkbackups
 rm -rf ${mountpoint}/home/*/.mozilla/firefox/*/safebrowsing-backup
@@ -82,9 +83,9 @@ find ${mountpoint}/home/*/.config/google-chrome.jb -name "*bak" -exec rm {} \;
 find ${mountpoint}/home/*/.config/google-chrome.jb -name "*old*" -exec rm {} \;
 
 # Clean boot directory
-rm ${mountpoint}/boot/vmlinuz*
-rm ${mountpoint}/boot/initramfs*.img
-rm ${mountpoint}/boot/archiso*.img
+rm ${mountpoint}/boot/vmlinuz* 2>/dev/null;
+rm ${mountpoint}/boot/initramfs*.img 2>/dev/null;
+rm ${mountpoint}/boot/archiso*.img 2>/dev/null;
 
 # Allow squashfs boot
 echo "==> Removing fstab and mtab"

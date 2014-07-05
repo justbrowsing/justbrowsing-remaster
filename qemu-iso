@@ -1,12 +1,20 @@
 #!/bin/bash
 ####################
 ### qemu-iso #######
-version="0.2" ######
+version="0.3" ######
 ### JustBrowsing ###
 ####################
+
+NOTIFY_ERROR() { while read err; do notify-send "$err"; done; }
 
 isoFile="$1"
 gpuDriver="$2"
 [ -z "$gpuDriver" ] && gpuDriver="vmware"
-#SDL_VIDEO_X11_DGAMOUSE=0 
-QEMU_AUDIO_DRV=alsa qemu-system-x86_64 -enable-kvm -machine type=pc,accel=kvm -cpu host -soundhw ac97 -m 2000 -cdrom "$isoFile" -vga "$gpuDriver" -usbdevice tablet
+
+cfgImg=$(dirname "$isoFile" | sed 's/$/\/JUSTDATA.img/')
+[ -f "$cfgImg" ] && usbHDD="-hda ${cfgImg} -boot order=d"
+
+QEMU_AUDIO_DRV=alsa qemu-system-x86_64 \
+  -enable-kvm -machine type=pc,accel=kvm -cpu host \
+  -soundhw ac97 -m 2000 -cdrom "$isoFile" -vga "$gpuDriver" \
+  -usbdevice tablet ${usbHDD} 2>&1 | NOTIFY_ERROR

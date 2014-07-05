@@ -44,6 +44,15 @@ EXTRACT_DEPENDS() {
   else
     EXIT_STATUS "$arch: unsupported architecture";
   fi
+
+  ifFS=$(which rebuild-fs 2>/dev/null)
+  if [ ! -z "$ifFS" ]; then
+    rebuildFS="rebuild-fs";
+  elif [ -f "$dirName/rebuild-fs" ]; then
+    rebuildFS="$dirName/squash-image";
+  else
+    EXIT_STATUS "Script rebuild-fs missing";
+  fi
 }
 
 EXTRACT_IMG() {
@@ -78,9 +87,16 @@ EXTRACT_IMG() {
   cd - > /dev/null &&
   cp ${mntDir}/arch/boot/${machine}/{vmlinuz,archiso.img} "$tmpDir"
   umount "$mntDir"
+
+  # Expand filesystem
+  fsImage="${tmpDir}/squashfs-root/unclean-image.fs"
+  imgFile="${tmpDir}/squashfs-root/root-image.fs"
+  echo "==> Expand Image Filesystem :: $rebuildFS"
+  mv "$imgFile" "$fsImage" &&
+  "$rebuildFS" "$fsImage" "$imgFile" 2000 &&
+  rm "$fsImage" &&
   
   # Mount filesystem
-  imgFile="${tmpDir}/squashfs-root/root-image.fs"
   mount "$imgFile" "$mntDir" || EXIT_STATUS "unable to mount root-image.fs to ${mntDir}"
   echo "/dev/sda / ext4 noatime 0 1" > "${mntDir}/etc/fstab" &&
   echo "==> Created fstab"
