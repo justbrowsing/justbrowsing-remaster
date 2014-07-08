@@ -1,7 +1,7 @@
 #!/bin/bash
 ####################
 ### squash-image ###
-version="0.4" ######
+version="0.5" ######
 ### JustBrowsing ###
 ####################
 
@@ -80,7 +80,7 @@ rm -rf ${mountpoint}/home/*/.config/google-chrome.jb/pnacl/
 rm -rf ${mountpoint}/home/*/.config/google-chrome.jb/PnaclTranslationCache/
 rm -rf ${mountpoint}/home/*/.config/google-chrome.jb/Safe\ Browsing\ *
 find ${mountpoint}/home/*/.config/google-chrome.jb -name "*bak" -exec rm {} \;
-find ${mountpoint}/home/*/.config/google-chrome.jb -name "*old*" -exec rm {} \;
+find ${mountpoint}/home/*/.config/google-chrome.jb -name "*old" -exec rm {} \;
 
 # Clean boot directory
 rm ${mountpoint}/boot/vmlinuz* 2>/dev/null;
