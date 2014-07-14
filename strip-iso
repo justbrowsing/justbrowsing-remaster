@@ -1,0 +1,270 @@
+#!/bin/bash
+####################
+### strip-iso ######
+version="0.1" ######
+### JustBrowsing ###
+####################
+
+isoFile=$(readlink -e "$@" 2>/dev/null);
+mntDir="/opt/jb-iso"
+tmpDir="/opt/jb-tmp"
+buildDir="/opt/jb-build"
+syslinuxDir="${buildDir}/syslinux/arch/boot/syslinux"
+flag="--firefox"
+
+
+EXIT_STATUS() { echo "ERROR: $@"; CLEAN_UP; exit 1; }
+
+CLEAN_UP() 
+{
+  echo "==> Cleanup";
+  umount "${mntDir}/var/cache" "${mntDir}/tmp" "${mntDir}/proc/" "${mntDir}/sys/" "${mntDir}/dev/pts" "${mntDir}/dev/" 2>/dev/null;
+  umount "$mntDir/*/*" 2>/dev/null;
+  umount "$mntDir/*" 2>/dev/null;
+  umount "$mntDir" 2>/dev/null;
+  rm -rf "$mntDir"
+  rm -rf "$buildDir/syslinux"
+  rm -rf "$buildDir/tmp-dir"
+  rm -rf "$tmpDir"
+  mount -o remount,gid=5,mode=620 /dev/pts
+}
+
+
+# Only Firefox
+if [ "$1" = "--firefox" ]; then
+  echo -e "\033[1m:::::> Only Firefox enabled\033[0m";
+  shift; 
+  flag="--firefox";
+  isoFile=$(readlink -e "$@" 2>/dev/null);
+fi
+
+# Only Firefox
+if [ "$1" = "--chrome" ]; then
+  echo -e "\033[1m:::::> Only Chrome enabled\033[0m";
+  shift; 
+  flag="--chrome";
+  isoFile=$(readlink -e "$@" 2>/dev/null);
+fi
+
+# Check depends
+checkISO=$(file -F "|" "$isoFile" | awk -F "|" '{print $2}' | grep -o -e "ISO 9660" -e "x86 boot sector" -e "DOS/MBR boot");
+ifSquash=$(which mksquashfs 2>/dev/null);
+ifFS=$(which rebuild-fs 2>/dev/null);
+ifImage=$(which squash-image 2>/dev/null);
+ifSfs=$(which sfs2iso 2>/dev/null);
+dirName=$(pwd);
+
+[ -f "$isoFile" ] || EXIT_STATUS "file $isoFile does not exist"
+[ ! -z "$checkISO" ] || EXIT_STATUS "$isoFile not a valid ISO file";
+[ ! -z "$checkISO" ] && echo "==> Hybrid-ized ISO detected"
+[ ! -z "$ifSquash" ] || EXIT_STATUS "Package squashfs-tools missing"
+
+if [ ! -z "$ifFS" ]; then
+  rebuildFS="rebuild-fs";
+elif [ -f "$dirName/rebuild-fs" ]; then
+  rebuildFS="$dirName/squash-image";
+else
+  EXIT_STATUS "Script rebuild-fs missing";
+fi
+
+if [ ! -z "$ifImage" ]; then
+  squashImage="squash-image";
+elif [ -f "$dirName/squash-image" ]; then
+  squashImage="$dirName/squash-image";
+else
+  EXIT_STATUS "Script squash-image missing";
+fi
+
+if [ ! -z "$ifSfs" ]; then
+  sfs2ISO="sfs2iso";
+elif [ -f "$dirName/sfs2iso" ]; then
+  sfs2ISO="$dirName/sfs2iso";
+else
+  EXIT_STATUS "Script sfs2iso missing";
+fi
+
+# Setup
+[ "$UID" = "0" ] || EXIT_STATUS "Need to be root"
+mkdir -p "$mntDir" "$tmpDir" "$buildDir" &&
+rm "${buildDir}/iso.log" 2>/dev/null
+
+# Mount ISO
+mount -o loop "$isoFile" "$mntDir" &&
+echo "==> Mounted $isoFile : $mntDir"
+machine="i686"
+[ -f "${mntDir}/arch/pkglist.x86_64.txt" ] && machine="x86_64"
+echo "==> Preparing to build ${machine} image"
+
+# Unpack image
+mkdir -p "${buildDir}/syslinux/arch/any" &&
+cp -r "${mntDir}/[BOOT]" "${mntDir}/EFI" "${mntDir}/isolinux" "${mntDir}/loader" "${buildDir}/syslinux/" &&
+cp "${mntDir}/arch/aitab" "${buildDir}/syslinux/arch/"
+cp "${mntDir}/arch/checksum.${machine}.md5" "${buildDir}/syslinux/arch/"
+cp "${mntDir}/arch/pkglist.${machine}.txt" "${buildDir}/syslinux/arch/"
+cp "${mntDir}/arch/flavor.jb" "${buildDir}/syslinux/arch/"
+mkdir -p "${buildDir}/syslinux/arch/boot"/{i686,x86_64} &&
+cp -r "${mntDir}/arch/boot/syslinux" "${buildDir}/syslinux/arch/boot/" &&
+
+# Unsquash image
+cd "$tmpDir" &&
+unsquashfs "${mntDir}/arch/any/root-image.fs.sfs" &&
+echo "==> Unsquashed to $tmpDir" &&
+cd - > /dev/null &&
+cp "${mntDir}/arch/boot/${machine}/vmlinuz" "${tmpDir}/vmlinuz-linux" &&
+cp "${mntDir}/arch/boot/${machine}/archiso.img" "${tmpDir}/initramfs-linux.img" &&
+umount "$mntDir" &&
+
+# Mount image
+mount "${tmpDir}/squashfs-root/root-image.fs" "$mntDir" &&
+echo "==> Mounted at: ${mntDir}" &&
+
+# Edit config files
+sed -i "s/^Architecture =.*/Architecture = ${machine}/g" "${mntDir}/etc/pacman.conf" &&
+sed -i 's/^CheckSpace/#CheckSpace/g' "${mntDir}/etc/pacman.conf" &&
+sed -i 's/^HoldPkg/#CheckSpace/g' "${mntDir}/etc/pacman.conf" &&
+cp "${mntDir}/etc/fstab.working" "${mntDir}/etc/fstab" &&
+cp "${mntDir}/etc/mtab.working" "${mntDir}/etc/mtab" &&
+
+mkdir "${buildDir}/var-cache" 2>/dev/null
+mkdir "${buildDir}/tmp-dir"
+mount -o bind,exec,rw "${buildDir}/var-cache" "${mntDir}/var/cache"
+mount -o bind,exec,rw "${buildDir}/tmp-dir" "${mntDir}/tmp"
+mkdir -p "${mntDir}/var/cache/pacman/pkg"
+mkdir -p "${mntDir}/var/cache/apacman/pkg"
+
+# Enter chroot
+echo "==> Mounting chroot: ${mntDir}"
+mount -t proc proc "${mntDir}/proc/"
+mount -t sysfs sys "${mntDir}/sys/"
+mount -o bind /dev "${mntDir}/dev/"
+mount -t devpts pts "${mntDir}/dev/pts"
+mount -o remount,gid=5,mode=620 /dev/pts
+cp "${mntDir}/etc/resolv.conf" "${mntDir}/etc/resolv.conf.working"
+cp /etc/resolv.conf "${mntDir}/etc/resolv.conf"
+cp "${tmpDir}/vmlinuz-linux" "${mntDir}/boot/vmlinuz-linux"
+cp "${tmpDir}/initramfs-linux.img" "${mntDir}/boot/initramfs-linux.img"
+
+# Packages differences
+if [ "$flag" = "--firefox" ]; then
+  listChrome=$(chroot "$mntDir" pacman -Qq 2>/dev/null | grep chrome);
+  chroot "$mntDir" pacman -Rs $listChrome --noconfirm
+elif [ "$flag" = "--chrome" ]; then
+  listFirefox=$(chroot "$mntDir" pacman -Qq 2>/dev/null | grep firefox);
+  chroot "$mntDir" pacman -Rs $listFirefox --noconfirm
+fi
+
+# File differences
+if [ "$flag" = "--firefox" ]; then
+  GCpath="/home/user/.config/google-chrome";
+  chroot "$mntDir" rm -rf ${GCpath}{,-beta,-dev,-unstable,.jb}
+  adeskConfig="/opt/justbrowsing/firefox.cfg"
+  chroot "$mntDir" sed -i 's/cmd=loadjb-toggle/cmd=i3-msg exit/' "$adeskConfig"
+  chroot "$mntDir" sed -i 's/name=Chrome/name=Firefox/' "$adeskConfig"
+  chroot "$mntDir" sed -i 's/chrome\.png/firefox\.png/' "$adeskConfig"
+  chroot "$mntDir" cp "$adeskConfig" /opt/justbrowsing/google-chrome.cfg
+  chroot "$mntDir" cp "$adeskConfig" /home/user/.config/adeskbar/default.cfg
+  chroot "$mntDir" sed -i 's/ default="chrome"/ default="firefox"/' /usr/bin/setjb-default
+elif [ "$flag" = "--chrome" ]; then
+  FFpath="/home/user/.mozilla/firefox";
+  chroot "$mntDir" rm -rf ${FFpath}/{oknp3n8p.default,firefox.jb}
+  adeskConfig="/opt/justbrowsing/google-chrome.cfg"
+  chroot "$mntDir" sed -i 's/cmd=loadjb-toggle/cmd=i3-msg exit/' "$adeskConfig"
+  chroot "$mntDir" sed -i 's/name=Firefox/name=Chrome/' "$adeskConfig"
+  chroot "$mntDir" sed -i 's/firefox\.png/chrome\.png/' "$adeskConfig"
+  chroot "$mntDir" cp "$adeskConfig" /opt/justbrowsing/firefox.cfg
+  chroot "$mntDir" cp "$adeskConfig" /home/user/.config/adeskbar/default.cfg
+  chroot "$mntDir" sed -i 's/ default="firefox"/ default="chrome"/' /usr/bin/setjb-default
+fi
+
+read -p "Continue [enter] " input
+
+# Syslinux differences
+if [ "$flag" = "--firefox" ]; then
+  cp ${syslinuxDir}/{edition-ff,splash}.png
+  sed -i '/firefox/d' ${syslinuxDir}/archiso_browser.cfg
+  sed -i '/chrome/d' ${syslinuxDir}/archiso_browser.cfg
+  line=$(grep -n "^LABEL newchrome" ${syslinuxDir}/archiso_newprofiles.cfg | awk -F : '{print $1}')
+  sed -i "$line,$((line+11))d" ${syslinuxDir}/archiso_newprofiles.cfg
+  locales=$(grep -n "^  LABEL chrome" ${syslinuxDir}/archiso_locales.cfg 2>/dev/null | awk -F : '{print $1}' | tac); 
+  for entry in $locales; do sed -i "$entry,$((entry+10))d" ${syslinuxDir}/archiso_locales.cfg; done
+elif [ "$flag" = "--chrome" ]; then
+  cp ${syslinuxDir}/{edition-gc,splash}.png
+  sed -i '/firefox/d' ${syslinuxDir}/archiso_browser.cfg
+  sed -i '/chrome/d' ${syslinuxDir}/archiso_browser.cfg
+  line=$(grep -n "^LABEL newfirefox" ${syslinuxDir}/archiso_newprofiles.cfg 2>/dev/null | awk -F : '{print $1}')
+  sed -i "$line,$((line+11))d" ${syslinuxDir}/archiso_newprofiles.cfg
+  locales=$(grep -n "^  LABEL firefox" ${syslinuxDir}/archiso_locales.cfg 2>/dev/null | awk -F : '{print $1}' | tac); 
+  for entry in $locales; do sed -i "$entry,$((entry+10))d" ${syslinuxDir}/archiso_locales.cfg; done
+fi
+
+# Upgrade packages
+chroot "$mntDir" mkdir -p /var/cache/{apacman,pacman}/pkg
+chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null;
+
+# Set login
+echo '#!/bin/bash' > "${mntDir}/tmp/setrandom"
+echo 'urandom=$(tr -dc A-Za-z0-9_ < /dev/urandom | head -c 128);' >> "${mntDir}/tmp/setrandom"
+echo 'echo "${urandom}" > /opt/justbrowsing/stock' >> "${mntDir}/tmp/setrandom"
+echo 'echo -e "${urandom}\n${urandom}" | passwd user 2>&1' >> "${mntDir}/tmp/setrandom"
+chroot "$mntDir" chmod +x /tmp/setrandom
+chroot "$mntDir" /tmp/setrandom
+chroot "$mntDir" rm /tmp/setrandom 2>/dev/null
+
+# Taste flavor
+configEntry="${buildDir}/syslinux/arch/flavor.jb"
+[ -f "$configEntry" ] && flavor=$(grep -o "distroName\S*" "$configEntry" | sed 's/^distroName=//')
+
+# Disable root
+chroot "$mntDir" passwd -l root
+chroot "$mntDir" rm /tmp/setkey 2>/dev/null
+chroot "$mntDir" sed -i 's/^%wheel ALL=(ALL) NOPASSWD: ALL/# %wheel ALL=(ALL) NOPASSWD: ALL/g' /etc/sudoers 2>/dev/null
+chroot "$mntDir" sed -i '/^bindsym $mod+Return exec roxterm/d' "/home/user/.i3/config"
+chroot "$mntDir" systemctl disable sshd 2>/dev/null
+chroot "$mntDir" pacman -Rss roxterm --noconfirm 2>/dev/null
+chroot "$mntDir" pacman -Rss openssh --noconfirm 2>/dev/null
+chroot "$mntDir" pacman -Rss sudo --noconfirm 2>/dev/null
+chroot "$mntDir" mv /etc/X11/xorg.conf.d/10-disableVTs.{devmode,conf} 2>/dev/null
+
+# Remove crud
+chroot "$mntDir" pacman -R linux-headers xorg-server-devel perl db --noconfirm 2>/dev/null
+chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null;
+umount "${mntDir}/var/cache"
+chroot "$mntDir" /opt/justbrowsing/cleanup2 2>/dev/null;
+chroot "$mntDir" /opt/justbrowsing/compress-bins 2>/dev/null;
+chroot "$mntDir" pacman -Rss guile --noconfirm 2>/dev/null
+chroot "$mntDir" pacman -Rss gutenprint ghostscript --noconfirm 2>/dev/null ###
+chroot "$mntDir" pacman -Rss pacman arch-install-scripts expac --noconfirm 2>/dev/null
+
+# Cleanup /boot
+rm "${mntDir}/boot/vmlinuz-linux" 2>/dev/null;
+rm "${mntDir}/boot/initramfs-linux.img" 2>/dev/null;
+rm "${mntDir}/boot/initramfs-linux-fallback.img" 2>/dev/null;
+
+# Exit chroot
+umount "${mntDir}/var/cache" "${mntDir}/tmp" "${mntDir}/proc/" "${mntDir}/sys/" "${mntDir}/dev/pts" "${mntDir}/dev/"
+rm "${mntDir}/etc/fstab" "${mntDir}/etc/mtab" 
+cp "${mntDir}/etc/resolv.conf.working" "${mntDir}/etc/resolv.conf"
+
+# Remaster ISO
+read -t 5 -n 1 -p "==> Repack image (Y/n): " input
+echo "";
+if [[ "$input" != [Nn] ]]; then
+  umount "$mntDir" &&
+  echo "==> Rebuild Image Filesystem :: $rebuildFS" &&
+  mv "${tmpDir}/squashfs-root/root-image.fs" "${tmpDir}/squashfs-root/unclean-image.fs" &&
+  "$rebuildFS" "${tmpDir}/squashfs-root/unclean-image.fs" "${tmpDir}/squashfs-root/root-image.fs" &&
+  rm "${tmpDir}/squashfs-root/unclean-image.fs" &&
+  echo "==> Squash Image :: $squashImage" &&
+  "$squashImage" "${tmpDir}/squashfs-root/root-image.fs" "$mntDir" --noconfirm &&
+  echo "==> Convert to ISO :: $sfs2ISO" &&
+  "$sfs2ISO" "$tmpDir" "${buildDir}/syslinux" "$flag" | tee "${buildDir}/iso.log";
+  echo "[DONE]";
+else
+  CLEAN_UP; 
+  exit 0;
+fi
+
+# Cleanup
+CLEAN_UP
+
+### END ###

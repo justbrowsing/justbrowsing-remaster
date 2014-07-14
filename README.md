@@ -9,6 +9,7 @@ Depends on: **community/cdrtools**, **community/squashfs-tools**, **core/syslinu
 * *rebuild-fs*: expand, shrink, and clean ext4 partition
 * *squash-image*: converts dd image to squash-filesystem
 * *sfs2iso*: converts squash-filesystem to ISO
+* *strip-iso*: generates a "lite" version ISO
 * *upgrade-iso*: unpacks, upgrades and repacks ISO to latest packages
 
 =================
