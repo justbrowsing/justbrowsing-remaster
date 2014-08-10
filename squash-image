@@ -1,7 +1,7 @@
 #!/bin/bash
 ####################
 ### squash-image ###
-version="0.5" ######
+version="0.6" ######
 ### JustBrowsing ###
 ####################
 
@@ -62,10 +62,14 @@ rm ${mountpoint}/var/cache/pacman/* 2>/dev/null;
 
 # Clean logs
 echo "==> Cleaning logs"
+rm ${mountpoint}/var/log/lastlog 2>/dev/null;
 rm ${mountpoint}/var/log/faillog 2>/dev/null;
 rm ${mountpoint}/var/log/restoreboot.log 2>/dev/null;
 rm -r ${mountpoint}/var/log/journal/ 2>/dev/null;
 rm -r ${mountpoint}/var/log/old/ 2>/dev/null;
+rm ${mountpoint}/var/log/btmp 2>/dev/null;
+rm ${mountpoint}/var/log/wtmp 2>/dev/null;
+rm ${mountpoint}/var/lib/pacman/sync/*.db 2>/dev/null;
 
 # Clean browser profiles
 rm -rf ${mountpoint}/home/*/.adobe
@@ -74,13 +78,13 @@ rm -rf ${mountpoint}/home/*/.mozilla/firefox/*/bookmarkbackups
 rm -rf ${mountpoint}/home/*/.mozilla/firefox/*/safebrowsing-backup
 rm -f ${mountpoint}/home/*/.mozilla/firefox/*/adblock*/patterns-backup*ini
 rm -f ${mountpoint}/home/*/.mozilla/firefox/*/sessionstore.js
-find ${mountpoint}/home/*/.mozilla/firefox/firefox.jb -name "*bak" -exec rm {} \;
-find ${mountpoint}/home/*/.mozilla/firefox/firefox.jb -name "*old*" -exec rm {} \;
+find ${mountpoint}/home/*/.mozilla/firefox/firefox.jb -name "*bak" -exec rm {} \; 2>/dev/null
+find ${mountpoint}/home/*/.mozilla/firefox/firefox.jb -name "*old*" -exec rm {} \; 2>/dev/null
 rm -rf ${mountpoint}/home/*/.config/google-chrome.jb/pnacl/
 rm -rf ${mountpoint}/home/*/.config/google-chrome.jb/PnaclTranslationCache/
 rm -rf ${mountpoint}/home/*/.config/google-chrome.jb/Safe\ Browsing\ *
-find ${mountpoint}/home/*/.config/google-chrome.jb -name "*bak" -exec rm {} \;
-find ${mountpoint}/home/*/.config/google-chrome.jb -name "*old" -exec rm {} \;
+find ${mountpoint}/home/*/.config/google-chrome.jb -name "*.bak" -exec rm {} \; 2>/dev/null
+find ${mountpoint}/home/*/.config/google-chrome.jb -name "*.old" -exec rm {} \; 2>/dev/null
 
 # Clean boot directory
 rm ${mountpoint}/boot/vmlinuz* 2>/dev/null;
@@ -112,7 +116,7 @@ sDir=$(basename "$sParent");
 sGrandparent=$(dirname "$sParent");
 [ "$sFile" = "root-image.fs" ] || exit_status "Image filename must be named: root-image.fs"
 [ "$sDir" = "squashfs-root" ] || exit_status "Image directory must be named: squashfs-root"
-mksquashfs "$sParent" "$sGrandparent"/${sFile}.sfs || exit_status "mksquashfs failed"
+mksquashfs "$sParent" "$sGrandparent"/${sFile}.sfs -comp xz || exit_status "mksquashfs failed"
 [ -f "$sGrandparent/${sFile}.sfs" ] && echo "[COMPLETE]"
 
 ### END ###

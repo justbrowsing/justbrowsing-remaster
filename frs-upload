@@ -1,13 +1,14 @@
 #!/bin/bash
 ####################
 ### frs-upload #####
-version="0.5" ######
+version="0.6" ######
 ### JustBrowsing ###
 ####################
 
 release="$1";
 buildDir="/opt/jb-build"
 
+fileName="justbrowsing"
 userName="justbrowsing"
 projName="justbrowsing"
 alphaOne="j"
@@ -20,7 +21,7 @@ stable="false"
 
 UPLOAD_OVA()
 {
-  ovaFile="${buildDir}/${projName}_${release}${1}.ova"
+  ovaFile="${buildDir}/${fileName}_${release}${1}.ova"
   echo "==> Uploading $ovaFile"
   if [ -f "$ovaFile" ]; then
     echo "==> rsync -avP -e ssh $ovaFile ${userName}@frs.sourceforge.net:/home/frs/project/${alphaOne}/${alphaTwo}/${folderDir}/"
@@ -36,7 +37,7 @@ UPLOAD_OVA()
 
 UPLOAD_ISO()
 {
-  isoFile="${buildDir}/${projName}_${release}${1}.iso"
+  isoFile="${buildDir}/${fileName}_${release}${1}.iso"
   echo "==> Uploading $isoFile"
   if [ -f "$isoFile" ]; then
     echo "==> rsync -avP -e ssh $isoFile ${userName}@frs.sourceforge.net:/home/frs/project/${alphaOne}/${alphaTwo}/${folderDir}/"
@@ -74,6 +75,7 @@ UPLOAD_CHANGELOG()
 
 
 # Input parameters
+[ "$1" = "64" ] && shift && fileName="${fileName}64" && projName="${projName}/64bit"
 [[ $@ = *testing* ]] && testing="true"
 [[ $@ = *dev* ]] && dev="true"
 [[ $@ = *nightly* ]] && nightly="true"

@@ -1,7 +1,7 @@
 #!/bin/bash
 ####################
 ### strip-iso ######
-version="0.1" ######
+version="0.2" ######
 ### JustBrowsing ###
 ####################
 
@@ -144,6 +144,9 @@ cp /etc/resolv.conf "${mntDir}/etc/resolv.conf"
 cp "${tmpDir}/vmlinuz-linux" "${mntDir}/boot/vmlinuz-linux"
 cp "${tmpDir}/initramfs-linux.img" "${mntDir}/boot/initramfs-linux.img"
 
+# Sync package list
+chroot "$mntDir" pacman -Sy
+
 # Packages differences
 if [ "$flag" = "--firefox" ]; then
   listChrome=$(chroot "$mntDir" pacman -Qq 2>/dev/null | grep chrome);
@@ -176,30 +179,31 @@ elif [ "$flag" = "--chrome" ]; then
   chroot "$mntDir" sed -i 's/ default="firefox"/ default="chrome"/' /usr/bin/setjb-default
 fi
 
-read -p "Continue [enter] " input
+#read -p "Continue [enter] " input
 
 # Syslinux differences
 if [ "$flag" = "--firefox" ]; then
   cp ${syslinuxDir}/{edition-ff,splash}.png
   sed -i '/firefox/d' ${syslinuxDir}/archiso_browser.cfg
   sed -i '/chrome/d' ${syslinuxDir}/archiso_browser.cfg
-  line=$(grep -n "^LABEL newchrome" ${syslinuxDir}/archiso_newprofiles.cfg | awk -F : '{print $1}')
-  sed -i "$line,$((line+11))d" ${syslinuxDir}/archiso_newprofiles.cfg
   locales=$(grep -n "^  LABEL chrome" ${syslinuxDir}/archiso_locales.cfg 2>/dev/null | awk -F : '{print $1}' | tac); 
   for entry in $locales; do sed -i "$entry,$((entry+10))d" ${syslinuxDir}/archiso_locales.cfg; done
 elif [ "$flag" = "--chrome" ]; then
   cp ${syslinuxDir}/{edition-gc,splash}.png
   sed -i '/firefox/d' ${syslinuxDir}/archiso_browser.cfg
   sed -i '/chrome/d' ${syslinuxDir}/archiso_browser.cfg
-  line=$(grep -n "^LABEL newfirefox" ${syslinuxDir}/archiso_newprofiles.cfg 2>/dev/null | awk -F : '{print $1}')
-  sed -i "$line,$((line+11))d" ${syslinuxDir}/archiso_newprofiles.cfg
   locales=$(grep -n "^  LABEL firefox" ${syslinuxDir}/archiso_locales.cfg 2>/dev/null | awk -F : '{print $1}' | tac); 
   for entry in $locales; do sed -i "$entry,$((entry+10))d" ${syslinuxDir}/archiso_locales.cfg; done
 fi
 
-# Upgrade packages
+# Syslinux common
+sed -i 's/^MENU ROWS 10/MENU ROWS 8/' ${syslinuxDir}/archiso_head.cfg
+sed -i 's/^MENU TABMSGROW 15/MENU TABMSGROW 13/' ${syslinuxDir}/archiso_head.cfg
+sed -i '/^default/d' ${syslinuxDir}/f1.txt
+
+# First pass
 chroot "$mntDir" mkdir -p /var/cache/{apacman,pacman}/pkg
-chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null;
+chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null
 
 # Set login
 echo '#!/bin/bash' > "${mntDir}/tmp/setrandom"
@@ -223,17 +227,18 @@ chroot "$mntDir" systemctl disable sshd 2>/dev/null
 chroot "$mntDir" pacman -Rss roxterm --noconfirm 2>/dev/null
 chroot "$mntDir" pacman -Rss openssh --noconfirm 2>/dev/null
 chroot "$mntDir" pacman -Rss sudo --noconfirm 2>/dev/null
-chroot "$mntDir" mv /etc/X11/xorg.conf.d/10-disableVTs.{devmode,conf} 2>/dev/null
+chroot "$mntDir" mv /etc/X11/xorg.conf.d/10-disableVTs.conf{.devmode,} 2>/dev/null
 
 # Remove crud
-chroot "$mntDir" pacman -R linux-headers xorg-server-devel perl db --noconfirm 2>/dev/null
-chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null;
+chroot "$mntDir" rm /etc/justbrowsing/data/config 2>/dev/null
+chroot "$mntDir" pacman -R linux-headers xorg-server-devel perl db --noconfirm
+chroot "$mntDir" pacman -Rss guile --noconfirm
+chroot "$mntDir" pacman -Rss gutenprint ghostscript samsung-unified-driver --noconfirm
+chroot "$mntDir" pacman -Rss pacman arch-install-scripts expac --noconfirm
+chroot "$mntDir" rm /var/lib/pacman/sync/*.db 2>/dev/null
+chroot "$mntDir" /opt/justbrowsing/cleanup >/dev/null
 umount "${mntDir}/var/cache"
-chroot "$mntDir" /opt/justbrowsing/cleanup2 2>/dev/null;
-chroot "$mntDir" /opt/justbrowsing/compress-bins 2>/dev/null;
-chroot "$mntDir" pacman -Rss guile --noconfirm 2>/dev/null
-chroot "$mntDir" pacman -Rss gutenprint ghostscript --noconfirm 2>/dev/null ###
-chroot "$mntDir" pacman -Rss pacman arch-install-scripts expac --noconfirm 2>/dev/null
+chroot "$mntDir" /opt/justbrowsing/cleanup2 2>/dev/null
 
 # Cleanup /boot
 rm "${mntDir}/boot/vmlinuz-linux" 2>/dev/null;

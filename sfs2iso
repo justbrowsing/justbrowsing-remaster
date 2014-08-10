@@ -1,7 +1,7 @@
 #!/bin/bash
 ####################
 ### sfs2iso ########
-version="0.6" ######
+version="0.7" ######
 ### JustBrowsing ###
 ####################
 
@@ -17,6 +17,8 @@ distro=$(echo "$distroName" | tr -cd '[:alnum:]\n' | tr 'A-Z' 'a-z');
 
 [ "$3" = "--nightly" ] && timestamp="${timestamp}_nightly";
 [ "$3" = "--devedition" ] && timestamp="${timestamp}_dev";
+[ "$3" = "--firefox" ] && timestamp="${timestamp}_firefox";
+[ "$3" = "--chrome" ] && timestamp="${timestamp}_chrome";
 [ "$3" = "--tweak" ] && timestamp="${timestamp}_$(date +%H%M%S)";
 output="${distro}_${timestamp}.iso"
 
@@ -45,7 +47,7 @@ machine="i686"
 cd "$buildDir/arch"
 echo ":: Create ${distroName} ${machine} checksum"
 md5sum aitab any/root-image.fs.sfs > checksum.${machine}.md5
-cp "$squashDir/pkglist.${machine}.txt" pkglist.${machine}.txt
+cp "${buildDir}/arch/pkglist.${machine}.txt" pkglist.${machine}.txt
 cd - >/dev/null
 
 # Kernel and initrd

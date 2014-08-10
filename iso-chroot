@@ -1,8 +1,15 @@
 #!/bin/bash
+####################
+### iso-chroot #####
+version="0.2" ######
+### JustBrowsing ###
+####################
+
 buildDir="/opt/jb-build"
-isoMnt="/jb-compare/iso"
-sfsMnt="/jb-compare/squash"
-fsMnt="/jb-compare/ext4"
+baseDir=$(basename "$1" | sed 's/\.iso$//')
+isoMnt="/tmp/${baseDir}/iso"
+sfsMnt="/tmp/${baseDir}/squash"
+fsMnt="/tmp/${baseDir}/ext4"
 
 EXIT_STATUS() { echo "ERROR: $@"; EXIT_MATRIX; exit 1; }
 
